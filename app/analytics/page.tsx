@@ -3,6 +3,14 @@
 import { useState, useEffect, useMemo } from 'react'; // Add useMemo
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from '@/components/ui/carousel';
 import { ChildSelector } from '@/components/child-selector';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from '@/components/ui/chart'; // Import ChartLegend
@@ -51,6 +59,10 @@ export default function AnalyticsPage() {
   const [activityData, setActivityData] = useState<ActivityAnalyticsData | null>(null);
   const [isActivityLoading, setIsActivityLoading] = useState<boolean>(false);
   const [activityError, setActivityError] = useState<string | null>(null);
+  // Photo State
+  const [photos, setPhotos] = useState<any[]>([]);
+  const [isPhotosLoading, setIsPhotosLoading] = useState<boolean>(false);
+  const [photosError, setPhotosError] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -63,7 +75,8 @@ export default function AnalyticsPage() {
     if (!selectedChildId) {
       setSleepData([]);
       setMealData(null);
-      // Reset other data states here...
+      setActivityData(null);
+      setPhotos([]);
       return;
     }
 
@@ -102,7 +115,23 @@ export default function AnalyticsPage() {
     fetchSleepData();
     fetchMealData();
     fetchActivityData();
+    fetchPhotos();
   }, [selectedChildId]);
+
+  async function fetchPhotos() {
+    setIsPhotosLoading(true);
+    setPhotosError(null);
+    try {
+      const response = await fetch(`/api/analytics/photos?childId=${selectedChildId}`);
+      if (!response.ok) throw new Error((await response.json()).error || 'Failed to fetch photos');
+      setPhotos(await response.json());
+    } catch (err: any) {
+      console.error("Photos fetch error:", err);
+      setPhotosError(err.message); setPhotos([]);
+    } finally {
+      setIsPhotosLoading(false);
+    }
+  }
 
   async function fetchActivityData() {
     setIsActivityLoading(true);
@@ -183,16 +212,63 @@ export default function AnalyticsPage() {
       {selectedChildId && (
         <div className="space-y-6">
           {/* Combined Error Display (Optional) */}
-          {(sleepError || mealError || activityError) && (
+          {(sleepError || mealError || activityError || photosError) && (
             <Alert variant="destructive">
               <AlertTitle>Error Loading Analytics</AlertTitle>
               <AlertDescription>
                 {sleepError && <p>Sleep data error: {sleepError}</p>}
                 {mealError && <p>Meal data error: {mealError}</p>}
                 {activityError && <p>Activity data error: {activityError}</p>}
+                {photosError && <p>Photos error: {photosError}</p>}
               </AlertDescription>
             </Alert>
           )}
+
+          {/* Photo Gallery Card */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Photo Gallery</CardTitle>
+              <CardDescription>Recent photos from daily reports.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isPhotosLoading ? (
+                <div className="flex justify-center items-center h-60">
+                  <Loader2 className="h-8 w-8 animate-spin" />
+                </div>
+              ) : photos.length > 0 ? (
+                <div className="h-60 w-full">
+                  <Carousel className="w-full h-full">
+                    <CarouselContent>
+                      {photos.map((photo) => (
+                        <CarouselItem key={photo.id} className="flex items-center justify-center">
+                          <div className="relative w-full h-60">
+                            <Image
+                              src={photo.url}
+                              alt={photo.description || 'Daycare photo'}
+                              fill
+                              className="object-contain"
+                              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                            />
+                            {photo.description && (
+                              <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm">
+                                {photo.description}
+                              </div>
+                            )}
+                          </div>
+                        </CarouselItem>
+                      ))}
+                    </CarouselContent>
+                    <CarouselPrevious />
+                    <CarouselNext />
+                  </Carousel>
+                </div>
+              ) : (
+                <p className="text-center text-gray-500 h-60 flex items-center justify-center">
+                  No photos available for the selected period.
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>

@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { Toaster } from '@/components/ui/toaster';
+import { Providers } from '@/components/providers'; // Import the Providers component
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -18,8 +19,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
-        {children}
-        <Toaster />
+        <Providers> {/* Wrap children with Providers */}
+          {children}
+          <Toaster />
+        </Providers>
       </body>
     </html>
   );
