@@ -10,7 +10,7 @@ END$$;
 CREATE TABLE IF NOT EXISTS photos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   child_id UUID NOT NULL,
-  date DATE NOT NULL,
+  "date" DATE NOT NULL,  -- Explicitly quoted column name
   url TEXT NOT NULL,
   thumbnail_url TEXT,
   description TEXT,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS photos (
 );
 
 -- Step 3: Create index for photos if not exists
-CREATE INDEX IF NOT EXISTS idx_photos_child_date ON photos(child_id, date);
+CREATE INDEX IF NOT EXISTS idx_photos_child_date ON photos(child_id, "date");
 
 -- Step 4: Create invites table if not exists
 CREATE TABLE IF NOT EXISTS invites (
