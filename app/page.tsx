@@ -1,16 +1,16 @@
 "use client";
 
 import { useState } from 'react';
-import { useSession, signIn, signOut } from 'next-auth/react'; // Import next-auth hooks
+import { useSession, signIn, signOut } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { CalendarDays, LineChart, Baby, Clock, LogIn, LogOut } from 'lucide-react'; // Import icons
+import { CalendarDays, LineChart, Baby, Clock, LogIn, LogOut } from 'lucide-react';
 import Link from 'next/link';
 import { ChildSelector } from '@/components/child-selector';
 import { ChildMetrics } from '@/components/child-metrics';
 
 export default function Home() {
-  const { data: session, status } = useSession(); // Get session status
+  const { data: session, status } = useSession();
   const [selectedChildId, setSelectedChildId] = useState<string>('');
 
   return (
@@ -19,7 +19,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h1 className="text-3xl font-bold text-gray-900">Daycare Analytics</h1>
-            <div className="flex items-center gap-4"> {/* Container for selector and auth */}
+            <div className="flex items-center gap-4">
               {status === 'authenticated' && <ChildSelector onSelect={setSelectedChildId} />}
               {/* Auth Buttons */}
               {status === 'loading' && <Button variant="ghost" disabled>Loading...</Button>}
@@ -49,10 +49,9 @@ export default function Home() {
           </div>
         )}
 
-        {status === 'authenticated' && (
-          <> {/* Wrap main content */}
+        {status === 'authenticated' ? (
+          <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {/* Cards remain the same */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -111,22 +110,26 @@ export default function Home() {
                 <CardContent>
                   <div className="space-y-4">
                     <p className="text-sm text-gray-500">No recent activity to display.</p>
-                    {/* TODO: Fetch and display recent activity */}
                   </div>
                 </CardContent>
               </Card>
             </div>
           </>
-        )}
-
-        {/* Show a message if not authenticated */}
-        {status === 'unauthenticated' && (
+        ) : (
           <div className="text-center py-20">
             <h2 className="text-2xl font-semibold mb-4">Welcome to Daycare Analytics</h2>
             <p className="text-gray-600 mb-6">Please sign in with your Google account to view your child's data.</p>
             <Button onClick={() => signIn('google')}>
               <LogIn className="mr-2 h-4 w-4" /> Sign In with Google
             </Button>
+            <div className="mt-8">
+              <p className="text-gray-500 mb-2">For testing purposes:</p>
+              <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                <Button variant="outline" asChild>
+                  <Link href="/test">Test Page</Link>
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </main>
