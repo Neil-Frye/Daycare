@@ -8,6 +8,7 @@ import { CalendarDays, LineChart, Baby, Clock, LogIn, LogOut } from 'lucide-reac
 import Link from 'next/link';
 import { ChildSelector } from '@/components/child-selector';
 import { ChildMetrics } from '@/components/child-metrics';
+import { ErrorBoundary } from '@/components/error-boundary';
 
 export default function Home() {
   const { data: session, status } = useSession();
@@ -20,7 +21,17 @@ export default function Home() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h1 className="text-3xl font-bold text-gray-900">Daycare Analytics</h1>
             <div className="flex items-center gap-4">
-              {status === 'authenticated' && <ChildSelector onSelect={setSelectedChildId} />}
+              {status === 'authenticated' && (
+                <ErrorBoundary 
+                  fallback={
+                    <div className="w-[200px] h-10 bg-red-50 border border-red-200 rounded-md flex items-center justify-center text-red-500 text-sm">
+                      Failed to load children
+                    </div>
+                  }
+                >
+                  <ChildSelector onSelect={setSelectedChildId} />
+                </ErrorBoundary>
+              )}
               {/* Auth Buttons */}
               {status === 'loading' && <Button variant="ghost" disabled>Loading...</Button>}
               {status === 'unauthenticated' && (
@@ -51,7 +62,7 @@ export default function Home() {
 
         {status === 'authenticated' ? (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -93,6 +104,23 @@ export default function Home() {
                 <CardContent>
                   <Button asChild className="w-full">
                     <Link href="/calendar">View Calendar</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Baby className="h-5 w-5 text-pink-500" />
+                    Manage Children
+                  </CardTitle>
+                  <CardDescription>Add or update child information</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button asChild className="w-full">
+                    <Link href="/children/add" passHref>
+                      Add Child
+                    </Link>
                   </Button>
                 </CardContent>
               </Card>
