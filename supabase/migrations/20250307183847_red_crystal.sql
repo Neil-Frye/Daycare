@@ -49,7 +49,8 @@ CREATE POLICY "Users can manage their own children"
   ON children
   FOR ALL
   TO authenticated
-  USING (auth.uid() = user_id);
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
 -- Create daily_reports table
 CREATE TABLE daily_reports (
