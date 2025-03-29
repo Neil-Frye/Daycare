@@ -1,9 +1,10 @@
 "use client"
 
-import { Component, ErrorInfo, ReactNode } from 'react'
+import { Component, ErrorInfo, ReactNode } from 'react';
+import logger from '@/lib/logger'; // Import the centralized logger
 
 interface ErrorBoundaryProps {
-  children: ReactNode
+  children: ReactNode;
   fallback: ReactNode
 }
 
@@ -19,7 +20,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught:', error, errorInfo)
+    // Log the error using the centralized logger, including component stack info
+    logger.error(
+      { err: error, componentStack: errorInfo.componentStack },
+      'ErrorBoundary caught an error'
+    );
   }
 
   render() {
