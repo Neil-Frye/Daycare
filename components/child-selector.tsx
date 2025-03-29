@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import React from 'react'; // Removed useState, useEffect
 import {
   Select,
   SelectContent,
@@ -8,85 +8,58 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import supabase from '@/lib/supabase/client';
-import { Database } from '@/lib/supabase/types';
+// Removed supabase import as it's no longer needed here
+import { type Database, type Tables } from '@/lib/supabase/types'; // Keep type import
 
-type Child = Database['public']['Tables']['children']['Row'];
+// Use the generated type
+type Child = Tables<'children'>;
 
+// Updated props interface
 interface ChildSelectorProps {
-  onSelect: (childId: string) => void;
+  children: Child[]; // Accept children list as prop
+  selectedChildId: string | null; // Accept selected ID as prop
+  onChildChange: (childId: string) => void; // Renamed prop for clarity
+  // Add optional placeholder prop if needed
+  placeholder?: string;
+  className?: string; // Allow passing className
 }
 
-export function ChildSelector({ onSelect }: ChildSelectorProps) {
-  const [children, setChildren] = useState<Child[]>([]);
-  const [selectedChild, setSelectedChild] = useState<string>('');
-  const [loading, setLoading] = useState(true);
+export function ChildSelector({
+  children,
+  selectedChildId,
+  onChildChange,
+  placeholder = "Select a child",
+  className = "w-[200px]", // Default width
+}: ChildSelectorProps) {
 
-  useEffect(() => {
-    async function fetchChildren() {
-      try {
-        setLoading(true);
-        console.log('Fetching children from Supabase...');
-        const { data: children, error, status } = await supabase
-          .from('children')
-          .select('*')
-          .order('name');
-
-        console.log('Supabase response:', { status, data: children, error });
-        if (error) {
-          console.error('Supabase error details:', error);
-          throw error;
-        }
-
-        setChildren(children || []);
-        if (children?.length === 1) {
-          setSelectedChild(children[0].id);
-          onSelect(children[0].id);
-        }
-      } catch (error) {
-        console.error('Error fetching children:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchChildren();
-  }, [onSelect]);
-
-  if (loading) {
-    return (
-      <div className="w-[200px] h-10 bg-gray-100 rounded-md animate-pulse flex items-center justify-center">
-        <span className="text-xs text-gray-500">Loading children...</span>
-      </div>
-    );
-  }
+  // Loading state and error handling should be managed by the parent component
 
   if (children.length === 0) {
+    // Parent should handle the case where there are no children to pass
+    // Or display a minimal state here
     return (
-      <div className="w-[200px] h-10 flex flex-col items-center justify-center border rounded-md gap-1">
-        <span className="text-sm text-gray-500">No children found</span>
-        <button 
-          onClick={() => window.location.reload()}
-          className="text-xs text-blue-500 hover:underline"
-        >
-          Refresh
-        </button>
-      </div>
+       <div className={`${className} h-10 flex items-center justify-center border rounded-md`}>
+         <span className="text-sm text-gray-500">No children available</span>
+       </div>
     );
   }
 
   return (
     <Select
-      value={selectedChild}
+      // Use the selectedChildId prop, ensuring it's a string or undefined for the Select component
+      value={selectedChildId ?? ""}
       onValueChange={(value) => {
-        setSelectedChild(value);
-        onSelect(value);
+        // Call the callback function passed from the parent
+        if (value) { // Ensure value is not empty string if placeholder is selected
+            onChildChange(value);
+        }
       }}
     >
-      <SelectTrigger className="w-[200px]">
-        <SelectValue placeholder="Select a child" />
+      <SelectTrigger className={className}>
+        <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
+        {/* Map over the children prop */}
         {children.map((child) => (
           <SelectItem key={child.id} value={child.id}>
             {child.name}

@@ -28,7 +28,12 @@ const transport = isProduction
       },
     };
 
+// Add transport to options if it's defined (i.e., not production)
+if (transport) {
+  pinoOptions.transport = transport;
+}
+
 // Create the logger instance
-const logger = pino(pinoOptions, transport ? pino.transport(transport) : undefined);
+const logger = pino(pinoOptions);
 
 export default logger;
