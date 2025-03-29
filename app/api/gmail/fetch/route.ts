@@ -6,7 +6,35 @@ import { withApiHandler } from '@/lib/api/handler'; // Import the wrapper
 import { processGmailMessage, ProcessMessageStatus } from '@/lib/gmail/processor'; // Import processor
 import logger from '@/lib/logger';
 
-// Define the core logic for the GET handler
+/**
+ * Gmail Fetch API Route
+ * 
+ * This route handles fetching and processing daycare reports from Gmail.
+ * 
+ * Workflow:
+ * 1. Authenticates using NextAuth session token
+ * 2. Fetches recent messages from configured sender (@tadpoles.com)
+ * 3. Processes each message through the Gmail processor
+ * 4. Stores extracted data in Supabase
+ * 5. Returns processing statistics
+ * 
+ * Error Handling:
+ * - Missing auth tokens return 401
+ * - Gmail API errors are logged and included in response
+ * - Message processing errors are aggregated
+ * 
+ * Configuration:
+ * - Currently hardcoded to fetch from @tadpoles.com
+ * - Processes max 10 messages per request
+ */
+/**
+ * Core handler for Gmail fetch requests
+ * @param {NextRequest} request - Next.js request object
+ * @param {Session} session - Authenticated user session
+ * @returns {Promise<NextResponse>} Response with processing results
+ * 
+ * @throws Will throw if critical errors occur (handled by withApiHandler)
+ */
 const fetchGmailHandler = async (request: NextRequest, session: Session) => {
     const userId = session.user.id;
     const accessToken = session.accessToken;
@@ -24,7 +52,9 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     // List recent messages from the target sender
-    // TODO: Make query and maxResults configurable?
+    // TODO: Make these configurable via environment variables:
+    // - SENDER_DOMAIN: Email domain to filter messages from (e.g. @tadpoles.com)
+    // - MAX_MESSAGES: Number of messages to process per request
     const listResponse = await gmail.users.messages.list({
         userId: 'me',
         q: 'from:@tadpoles.com', // Consider making domain configurable
@@ -39,7 +69,17 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
 
     logger.info({ userId, route: '/api/gmail/fetch', count: messageItems.length }, "Found messages to process.");
 
-    // Process each message using the centralized processor function
+    /**
+     * Process each message through the Gmail processor pipeline
+     * 
+     * The processor handles:
+     * - Message content extraction
+     * - Data validation
+     * - Child record matching
+     * - Supabase storage
+     * 
+     * Results are aggregated to provide detailed feedback
+     */
     const processingResults = await Promise.allSettled(
         messageItems.map(messageItem => {
             if (!messageItem.id) {
@@ -105,8 +145,17 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
     return NextResponse.json(summary);
 };
 
-// Export the wrapped handler
-// Note: The withApiHandler already handles basic authentication and generic errors.
-// Specific Google API errors (like 401 due to expired token) might need explicit handling
-// either within fetchGmailHandler or by enhancing withApiHandler.
+    /**
+     * Wrapped GET handler
+     * 
+     * Uses withApiHandler middleware which provides:
+     * - Session validation
+     * - Error handling
+     * - Logging
+     * 
+     * TODO: Enhance to handle:
+     * - Google API token refresh
+     * - Rate limiting
+     * - Batch processing for large message sets
+     */
 export const GET = withApiHandler(fetchGmailHandler);
