@@ -93,35 +93,34 @@ export function findHtmlPart(parts: gmail_v1.Schema$MessagePart[] | undefined): 
  * until an element matching `stopSelector` is encountered.
  * Used internally by parseReportData.
  */
-// Using 'any' as a workaround for persistent Cheerio type issues
-function getTextUntil(startElement: any, stopSelector: string, $: any): string[] {
+// Use cheerio.Cheerio for the element collection and cheerio.Root for the loaded document ($)
+function getTextUntil(startElement: cheerio.Cheerio, stopSelector: string, $: cheerio.Root): string[] {
     const texts: string[] = [];
-    let currentElement = startElement.next();
-
     // Define common section headings that act as implicit stops
     const stopHeadings = [
         "NAPS", "MEALS", "BATHROOM", "ACTIVITIES", "SNAPSHOTS", "TODAY'S TEACHER NOTES", "PARENT NOTES"
         // Add any other known section titles here
     ];
-    const stopHeadingsSelector = stopHeadings.map(h => `*:contains("${h}")`).join(', ');
+    // Create a combined selector for explicit stops and heading stops
+    const combinedStopSelector = `${stopSelector}, ${stopHeadings.map(h => `*:contains("${h}")`).join(', ')}`;
 
-    while (currentElement.length > 0) {
-        // Stop if the current element itself matches the explicit stopSelector or contains a stop heading
-        if (currentElement.is(stopSelector) || currentElement.find(stopSelector).length > 0 || currentElement.is(stopHeadingsSelector) || currentElement.find(stopHeadingsSelector).length > 0) {
-             // Check if the startElement itself contains a stop heading text (edge case)
-             const startText = startElement.text().toUpperCase();
-             const isStartStopHeading = stopHeadings.some(h => startText.includes(h));
-             if(!isStartStopHeading || !stopHeadings.some(h => currentElement.text().toUpperCase().includes(h))) {
-                 break; // Break only if the current element is a *different* stop heading
-             }
+    // Iterate over all subsequent siblings, explicitly typing the callback parameters
+    startElement.nextAll().each((index: number, element: cheerio.Element) => {
+        const currentElement = $(element);
+
+        // Check if the current element matches the combined stop selector
+        if (currentElement.is(combinedStopSelector)) {
+            // Check if the startElement itself contains a stop heading text (edge case)
+            // We only stop if the *current* element is a stop, regardless of the start element.
+            return false; // Stop .each() iteration
         }
 
         const text = currentElement.text().trim();
         if (text) {
             texts.push(text);
         }
-        currentElement = currentElement.next();
-    }
+    });
+
     return texts;
 }
 
@@ -132,6 +131,7 @@ function getTextUntil(startElement: any, stopSelector: string, $: any): string[]
  * @returns A ParsedReport object containing the extracted data.
  */
 export function parseReportData(htmlContent: string): ParsedReport {
+    // Let TypeScript infer the type of $ from cheerio.load(), which is cheerio.Root
     const $ = cheerio.load(htmlContent);
     const report: ParsedReport = {
         childName: '', reportDate: '', teacherNotes: '',
