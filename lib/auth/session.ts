@@ -1,5 +1,5 @@
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { authOptions } from '@/lib/auth/options'; // Import from the new location
 import { type NextAuthOptions, type Session } from 'next-auth';
 import { NextResponse } from 'next/server'; // Import for error response
 
