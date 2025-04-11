@@ -6,20 +6,8 @@ BEGIN
   END IF;
 END$$;
 
--- Step 2: Create photos table if not exists
-CREATE TABLE IF NOT EXISTS photos (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  child_id UUID NOT NULL,
-  "date" DATE NOT NULL,  -- Explicitly quoted column name
-  url TEXT NOT NULL,
-  thumbnail_url TEXT,
-  description TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE
-);
-
--- Step 3: Create index for photos if not exists
-CREATE INDEX IF NOT EXISTS idx_photos_child_date ON photos(child_id, "date");
+-- Step 2 & 3 Removed: Photos table definition and index are handled in 20250327155345_refine_report_schema.sql
+-- The photos table defined in the earlier migration links to daily_reports via report_id.
 
 -- Step 4: Create invites table if not exists
 CREATE TABLE IF NOT EXISTS invites (
@@ -30,7 +18,7 @@ CREATE TABLE IF NOT EXISTS invites (
   status invite_status NOT NULL DEFAULT 'pending',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE,
-  FOREIGN KEY (inviter_id) REFERENCES users(id) ON DELETE CASCADE
+  FOREIGN KEY (inviter_id) REFERENCES auth.users(id) ON DELETE CASCADE -- Corrected reference to auth.users
 );
 
 -- Step 5: Create indexes for invites if not exists

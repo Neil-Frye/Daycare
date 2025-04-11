@@ -36,24 +36,43 @@ export type Database = {
     Tables: {
       activities: {
         Row: {
+          child_id: string | null
           created_at: string | null
           description: string | null
           id: string
-          report_id: string
+          notes: string | null
+          report_id: string | null
+          source: string
+          time: string | null
         }
         Insert: {
+          child_id?: string | null
           created_at?: string | null
           description?: string | null
           id?: string
-          report_id: string
+          notes?: string | null
+          report_id?: string | null
+          source?: string
+          time?: string | null
         }
         Update: {
+          child_id?: string | null
           created_at?: string | null
           description?: string | null
           id?: string
-          report_id?: string
+          notes?: string | null
+          report_id?: string | null
+          source?: string
+          time?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "activities_child_id_fkey"
+            columns: ["child_id"]
+            isOneToOne: false
+            referencedRelation: "children"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "activities_report_id_fkey"
             columns: ["report_id"]
@@ -65,33 +84,49 @@ export type Database = {
       }
       bathroom_events: {
         Row: {
+          child_id: string | null
           created_at: string | null
           event_time: string | null
-          event_type: string | null
           id: string
           initials: string[] | null
-          report_id: string
-          status: string | null
+          legacy_event_type: string | null
+          notes: string | null
+          report_id: string | null
+          source: string
+          type: string | null
         }
         Insert: {
+          child_id?: string | null
           created_at?: string | null
           event_time?: string | null
-          event_type?: string | null
           id?: string
           initials?: string[] | null
-          report_id: string
-          status?: string | null
+          legacy_event_type?: string | null
+          notes?: string | null
+          report_id?: string | null
+          source?: string
+          type?: string | null
         }
         Update: {
+          child_id?: string | null
           created_at?: string | null
           event_time?: string | null
-          event_type?: string | null
           id?: string
           initials?: string[] | null
-          report_id?: string
-          status?: string | null
+          legacy_event_type?: string | null
+          notes?: string | null
+          report_id?: string | null
+          source?: string
+          type?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "bathroom_events_child_id_fkey"
+            columns: ["child_id"]
+            isOneToOne: false
+            referencedRelation: "children"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "bathroom_events_report_id_fkey"
             columns: ["report_id"]
@@ -105,6 +140,7 @@ export type Database = {
         Row: {
           birth_date: string
           created_at: string | null
+          gender: string | null
           id: string
           name: string
           user_id: string
@@ -112,6 +148,7 @@ export type Database = {
         Insert: {
           birth_date: string
           created_at?: string | null
+          gender?: string | null
           id?: string
           name: string
           user_id: string
@@ -119,6 +156,7 @@ export type Database = {
         Update: {
           birth_date?: string
           created_at?: string | null
+          gender?: string | null
           id?: string
           name?: string
           user_id?: string
@@ -193,35 +231,86 @@ export type Database = {
         }
         Relationships: []
       }
+      invites: {
+        Row: {
+          child_id: string
+          created_at: string
+          id: string
+          invitee_email: string
+          inviter_id: string
+          status: Database["public"]["Enums"]["invite_status"]
+        }
+        Insert: {
+          child_id: string
+          created_at?: string
+          id?: string
+          invitee_email: string
+          inviter_id: string
+          status?: Database["public"]["Enums"]["invite_status"]
+        }
+        Update: {
+          child_id?: string
+          created_at?: string
+          id?: string
+          invitee_email?: string
+          inviter_id?: string
+          status?: Database["public"]["Enums"]["invite_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invites_child_id_fkey"
+            columns: ["child_id"]
+            isOneToOne: false
+            referencedRelation: "children"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meals: {
         Row: {
+          child_id: string | null
           created_at: string | null
           details: string | null
           food_description: string | null
           id: string
           initials: string[] | null
           meal_time: string | null
-          report_id: string
+          notes: string | null
+          report_id: string | null
+          source: string
         }
         Insert: {
+          child_id?: string | null
           created_at?: string | null
           details?: string | null
           food_description?: string | null
           id?: string
           initials?: string[] | null
           meal_time?: string | null
-          report_id: string
+          notes?: string | null
+          report_id?: string | null
+          source?: string
         }
         Update: {
+          child_id?: string | null
           created_at?: string | null
           details?: string | null
           food_description?: string | null
           id?: string
           initials?: string[] | null
           meal_time?: string | null
-          report_id?: string
+          notes?: string | null
+          report_id?: string | null
+          source?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "meals_child_id_fkey"
+            columns: ["child_id"]
+            isOneToOne: false
+            referencedRelation: "children"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "meals_report_id_fkey"
             columns: ["report_id"]
@@ -233,30 +322,46 @@ export type Database = {
       }
       naps: {
         Row: {
+          child_id: string | null
           created_at: string | null
           duration_text: string | null
           end_time: string | null
           id: string
-          report_id: string
+          notes: string | null
+          report_id: string | null
+          source: string
           start_time: string | null
         }
         Insert: {
+          child_id?: string | null
           created_at?: string | null
           duration_text?: string | null
           end_time?: string | null
           id?: string
-          report_id: string
+          notes?: string | null
+          report_id?: string | null
+          source?: string
           start_time?: string | null
         }
         Update: {
+          child_id?: string | null
           created_at?: string | null
           duration_text?: string | null
           end_time?: string | null
           id?: string
-          report_id?: string
+          notes?: string | null
+          report_id?: string | null
+          source?: string
           start_time?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "naps_child_id_fkey"
+            columns: ["child_id"]
+            isOneToOne: false
+            referencedRelation: "children"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "naps_report_id_fkey"
             columns: ["report_id"]
@@ -306,7 +411,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      invite_status: "pending" | "accepted" | "declined"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -424,7 +529,8 @@ export const Constants = {
     Enums: {},
   },
   public: {
-    Enums: {},
+    Enums: {
+      invite_status: ["pending", "accepted", "declined"],
+    },
   },
 } as const
-
