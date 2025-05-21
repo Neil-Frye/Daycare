@@ -1,8 +1,15 @@
 import * as cheerio from 'cheerio'; // Revert to namespace import
 import { gmail_v1 } from 'googleapis';
-import logger from '@/lib/logger'; // Import logger for potential parsing warnings
+import pino from 'pino'; // Import pino for the logger type
+import globalLogger from '@/lib/logger'; // Import global logger for use in functions not part of a strategy or as a fallback
 
 // --- Types --- (Define interfaces for better type safety)
+
+// ReportParser function type
+export type ReportParser = (
+    htmlContent: string,
+    logger: pino.Logger // Use pino.Logger as the type for the passed logger
+) => ParsedReport | null;
 
 export interface ParsedNap {
     durationText: string | null;
@@ -65,7 +72,8 @@ export function base64UrlDecode(input: string): string {
         }
         return Buffer.from(base64, 'base64').toString('utf-8');
     } catch (error: any) {
-        logger.error({ err: error, inputLength: input?.length }, "Failed to decode base64url string");
+        // Use globalLogger here as this function is generic and not part of a specific parsing strategy
+        globalLogger.error({ err: error, inputLength: input?.length }, "Failed to decode base64url string");
         throw new Error(`Failed to decode base64url: ${error.message}`);
     }
 }
@@ -128,9 +136,10 @@ function getTextUntil(startElement: cheerio.Cheerio, stopSelector: string, $: ch
 /**
  * Parses the HTML content of a Tadpoles daily report email.
  * @param htmlContent The HTML string.
- * @returns A ParsedReport object containing the extracted data.
+ * @param logger The logger instance to use for logging within the parser.
+ * @returns A ParsedReport object containing the extracted data, or null if critical parsing fails.
  */
-export function parseReportData(htmlContent: string): ParsedReport {
+export const parseTadpolesReport: ReportParser = (htmlContent: string, logger: pino.Logger): ParsedReport | null => {
     // Let TypeScript infer the type of $ from cheerio.load(), which is cheerio.Root
     const $ = cheerio.load(htmlContent);
     const report: ParsedReport = {
@@ -157,8 +166,9 @@ export function parseReportData(htmlContent: string): ParsedReport {
         report.childName = nameElement.text().trim();
         // Add more robust name finding logic if needed
     } else {
-        logger.warn("Could not find 'DAILY REPORT - <Date>' header.");
+        logger.warn("parseTadpolesReport: Could not find 'DAILY REPORT - <Date>' header.");
         // Fallback logic for date/name if needed
+        // Depending on strictness, you might return null here if date/name are critical
     }
 
     // Define a more robust selector for section headings
@@ -169,7 +179,7 @@ export function parseReportData(htmlContent: string): ParsedReport {
     if (notesHeading.length) {
         report.teacherNotes = getTextUntil(notesHeading, sectionHeadingsSelector, $).join('\n');
     } else {
-         logger.debug("Teacher Notes section not found.");
+         logger.debug("parseTadpolesReport: Teacher Notes section not found.");
     }
 
     // --- Naps ---
@@ -186,7 +196,7 @@ export function parseReportData(htmlContent: string): ParsedReport {
             }
         });
     } else {
-         logger.debug("Naps section not found.");
+         logger.debug("parseTadpolesReport: Naps section not found.");
     }
 
     // --- Meals ---
@@ -206,7 +216,7 @@ export function parseReportData(htmlContent: string): ParsedReport {
             }
         });
     } else {
-         logger.debug("Meals section not found.");
+         logger.debug("parseTadpolesReport: Meals section not found.");
     }
 
     // --- Bathroom ---
@@ -226,7 +236,7 @@ export function parseReportData(htmlContent: string): ParsedReport {
             // Add logic for potty if needed: /(\d{1,2}:\d{2}\s*(?:AM|PM)?)\s*-\s*potty\s*-\s*(.*)/i
         });
     } else {
-         logger.debug("Bathroom section not found.");
+         logger.debug("parseTadpolesReport: Bathroom section not found.");
     }
 
     // --- Activities ---
@@ -247,7 +257,7 @@ export function parseReportData(htmlContent: string): ParsedReport {
             current = current.next();
         }
     } else {
-         logger.debug("Activities section not found.");
+         logger.debug("parseTadpolesReport: Activities section not found.");
     }
 
     // --- Photos (Snapshots) ---
@@ -277,12 +287,292 @@ export function parseReportData(htmlContent: string): ParsedReport {
              }
          });
     } else {
-         logger.debug("Snapshots section not found.");
+         logger.debug("parseTadpolesReport: Snapshots section not found.");
     }
 
-    // logger.debug({ parsedReport: report }, "Finished parsing report data"); // Log detailed parsed data only in debug
+    // Ensure critical fields are present, otherwise return null
+    if (!report.childName || !report.reportDate) {
+        logger.warn("parseTadpolesReport: Missing critical information (childName or reportDate), returning null.");
+        return null;
+    }
+
+    logger.debug({ parsedReport: report }, "parseTadpolesReport: Finished parsing report data");
     return report;
-}
+};
+
+/**
+ * Parses the HTML content of a Goddard school daily report (delivered via Tadpoles).
+ * @param htmlContent The HTML string.
+ * @param logger The logger instance to use for logging within the parser.
+ * @returns A ParsedReport object containing the extracted data, or null if critical parsing fails.
+ */
+export const parseGoddardViaTadpolesReport: ReportParser = (htmlContent: string, logger: pino.Logger): ParsedReport | null => {
+    const $ = cheerio.load(htmlContent);
+    const report: ParsedReport = {
+        childName: '', reportDate: '', teacherNotes: '',
+        naps: [], meals: [], bathroomEvents: [], activities: [], photos: [],
+    };
+
+    logger.info("parseGoddardViaTadpolesReport: Starting Goddard report parsing.");
+    // More specific content area for Goddard, typically the table with width="310" inside the main colored table
+    const contentArea = $('body table[width="320"][bgcolor="#004c77"] table[width="310"][bgcolor="#FFF"]').first();
+    if (!contentArea.length) {
+        logger.warn("parseGoddardViaTadpolesReport: Could not find main content area table. Using body as fallback.");
+        // Fallback to body if the specific table isn't found, though this is less reliable
+        // const contentArea = $('body'); // This was the original fallback, might be too broad
+    }
+
+
+    // --- Child Name and Report Date ---
+    // Goddard: <h1 style="font-family:Trebuchet MS,Helvetica,Arial,sans-serif;font-size:50px;line-height:1;margin:0;color: #00457c;">OLIVER&nbsp;</h1>
+    // Goddard: <h3 style="color: inherit;font-family:Trebuchet MS,Helvetica,Arial,sans-serif;font-size:18px;margin:0;">DAILY REPORT - May 20, 2025</h3>
+    const nameElement = contentArea.find('h1[style*="font-size:50px"]');
+    if (nameElement.length) {
+        report.childName = nameElement.text().replace(/&nbsp;/g, '').trim();
+    } else {
+        logger.warn("parseGoddardViaTadpolesReport: Child name <h1> not found as expected.");
+    }
+    
+    const dateHeaderElement = contentArea.find('h3:contains("DAILY REPORT -")');
+    if (dateHeaderElement.length) {
+        const headerText = dateHeaderElement.text();
+        const dateMatch = headerText.match(/DAILY REPORT - (.*)/i);
+        report.reportDate = dateMatch ? dateMatch[1].trim() : '';
+    } else {
+        logger.warn("parseGoddardViaTadpolesReport: 'DAILY REPORT - <Date>' header <h3> not found.");
+    }
+
+    if (!report.childName) logger.warn("parseGoddardViaTadpolesReport: Child name is missing after attempting extraction.");
+    if (!report.reportDate) logger.warn("parseGoddardViaTadpolesReport: Report date is missing after attempting extraction.");
+
+
+    // Define section selectors based on Goddard's h2 styling
+    const sectionHeadingsBaseSelector = 'h2[style*="font-size: 24px"]';
+
+    // --- Teacher Notes ---
+    // Goddard: <h3 style="font-family:Trebuchet MS,Helvetica,Arial,sans-serif;font-size:18px;line-height:27px;margin:0;font-weight:bold;color:#00457c">TODAY&#39;S TEACHER NOTES</h3>
+    const notesHeading = contentArea.find('h3:contains("TODAY\'S TEACHER NOTES")').first();
+    if (notesHeading.length) {
+        const notesContainer = notesHeading.next('div').find('table').first(); // The table right after the h3 div
+        let notesTexts: string[] = [];
+        
+        // General notes: spans directly under the first td of the first tr
+        notesContainer.find('tr > td > span[style*="font-size: 13px"]').each((i, el) => {
+             const text = $(el).text().trim();
+             if (text) notesTexts.push(text);
+        });
+
+        // "Please bring in the following items:"
+        const itemsNeededHeader = notesContainer.find('span:contains("Please bring in the following items:")');
+        if (itemsNeededHeader.length) {
+            const items: string[] = [];
+            // Items are in a nested table, usually after the "Please bring..." span's parent <tr>
+            itemsNeededHeader.closest('tr').next('tr').find('table tr').each((i, tr_el) => {
+                $(tr_el).find('td:last-child span').each((j, span_el) => { // Assuming item text is in the last td of each row
+                     const itemText = $(span_el).text().trim();
+                     if(itemText && itemText !== "•") items.push(itemText); // Filter out bullets
+                });
+            });
+            if (items.length > 0) {
+                 notesTexts.push("Please bring in: " + items.join(', '));
+            }
+        }
+        report.teacherNotes = notesTexts.join('\n').replace(/\n\s*\n/g, '\n');
+    } else {
+         logger.debug("parseGoddardViaTadpolesReport: Teacher Notes section not found.");
+    }
+
+    // --- Naps ---
+    const napsHeading = contentArea.find(`${sectionHeadingsBaseSelector}:contains("NAPS")`).first();
+    if (napsHeading.length) {
+        napsHeading.next('table').find('span[style*="font-size:14px"]').each((i, el) => {
+            const text = $(el).text().trim();
+            const m = text.match(/slept for (.*?) from (\d{1,2}:\d{2}(?:\s*(?:AM|PM))?) to (\d{1,2}:\d{2}(?:\s*(?:AM|PM))?)/i);
+            if (m) {
+                report.naps.push({
+                    durationText: m[1]?.trim() || null,
+                    startTime: m[2]?.trim() || null,
+                    endTime: m[3]?.trim() || null
+                });
+            } else if (text) { // Capture any text even if it doesn't match the full pattern
+                 report.naps.push({ durationText: text, startTime: null, endTime: null });
+            }
+        });
+    } else {
+         logger.debug("parseGoddardViaTadpolesReport: Naps section not found.");
+    }
+
+    // --- Meals ---
+    const mealsHeading = contentArea.find(`${sectionHeadingsBaseSelector}:contains("MEALS")`).first();
+    if (mealsHeading.length) {
+        mealsHeading.next('table').find('tr').each((i, tr_el) => {
+            const mainTextEl = $(tr_el).find('span[style*="font-size:14px"]').first();
+            const mainText = mainTextEl.text().trim();
+            const initialsEl = $(tr_el).find('div[style*="margin-left:20px"] span');
+            const initialsText = initialsEl.text().trim();
+
+            const mealMatch = mainText.match(/(?:(.*)\s@\s)?(\d{1,2}:\d{2}\s*(?:AM|PM)?)\s*-\s*(.*)/i);
+            if (mealMatch) {
+                const mealTypeOrTime = mealMatch[1]; 
+                const time = mealTypeOrTime && mealMatch[2] ? mealMatch[2].trim() : mealMatch[1].trim(); 
+                let foodDescription = mealTypeOrTime && mealMatch[2] ? mealMatch[3].trim() : mealMatch[2].trim();
+                
+                const fullDetails = mealTypeOrTime ? `${mealTypeOrTime.trim()}: ${foodDescription}` : foodDescription;
+
+                report.meals.push({
+                    time: time || null,
+                    food: foodDescription, 
+                    details: fullDetails, 
+                    initials: initialsText ? initialsText.split(/[,.\s]+/).filter(Boolean) : []
+                });
+            } else if (mainText) {
+                 report.meals.push({
+                    time: null, food: mainText, details: mainText,
+                    initials: initialsText ? initialsText.split(/[,.\s]+/).filter(Boolean) : []
+                });
+            }
+        });
+    } else {
+         logger.debug("parseGoddardViaTadpolesReport: Meals section not found.");
+    }
+
+    // --- Bathroom ---
+    const bathroomHeading = contentArea.find(`${sectionHeadingsBaseSelector}:contains("BATHROOM")`).first();
+    if (bathroomHeading.length) {
+        bathroomHeading.next('table').find('tr').each((i, tr_el) => {
+            const mainTextEl = $(tr_el).find('span[style*="font-size:14px"]').first();
+            let mainText = mainTextEl.text().trim();
+            
+            let initialsText = $(tr_el).find('div[style*="margin-left:20px"] span').text().trim();
+            if (!initialsText) { // Check for initials floated right
+                 const floatInitialEl = $(tr_el).find('span[style*="float:right"]');
+                 if (floatInitialEl.length) {
+                     initialsText = floatInitialEl.text().trim();
+                     mainText = mainText.replace(initialsText, '').trim(); // Remove from main text if picked up
+                 }
+            }
+
+            const m = mainText.match(/(\d{1,2}:\d{2}\s*(?:AM|PM)?)\s*-\s*diaper\s*-\s*(.*)/i);
+            if (m) {
+                report.bathroomEvents.push({
+                    time: m[1]?.trim() || null, type: 'diaper', status: m[2]?.trim() || '',
+                    initials: initialsText ? initialsText.split(/[,.\s]+/).filter(Boolean) : []
+                });
+            }  else if (mainText) { 
+                 report.bathroomEvents.push({
+                    time: null, type: 'unknown', status: mainText,
+                    initials: initialsText ? initialsText.split(/[,.\s]+/).filter(Boolean) : []
+                });
+            }
+        });
+    } else {
+         logger.debug("parseGoddardViaTadpolesReport: Bathroom section not found.");
+    }
+
+    // --- Activities ---
+    const activitiesHeading = contentArea.find(`${sectionHeadingsBaseSelector}:contains("ACTIVITIES")`).first();
+    if (activitiesHeading.length) {
+        activitiesHeading.next('table').find('tr').each((i, tr_el) => {
+            const activityTitleEl = $(tr_el).find('span[style*="font-weight:bold"]').first();
+            const activityTitle = activityTitleEl.text().trim();
+            
+            let description = "";
+            const descriptionContainer = activityTitleEl.parent().find('div[style*="margin-left:20px"]').first();
+            if (descriptionContainer.length) {
+                 description = descriptionContainer.find('span[style*="font-size:13px"], div[style*="font-size:13px"]').first().text().trim();
+                 if (!description && descriptionContainer.length) description = descriptionContainer.text().trim(); // Fallback if span isn't direct child
+            } else { 
+                description = activityTitleEl.parent().contents().filter(function() {
+                    return this.type === 'text';
+                }).text().trim();
+            }
+            
+            if (activityTitle.toLowerCase().includes("weekly theme:")) {
+                const themeDescription = activityTitle.replace(/Weekly Theme:\s*/i, '').trim();
+                if (themeDescription && !report.teacherNotes?.includes(themeDescription)) {
+                     report.teacherNotes = report.teacherNotes ? `${report.teacherNotes}\nWeekly Theme: ${themeDescription}` : `Weekly Theme: ${themeDescription}`;
+                }
+                return; 
+            }
+
+            let fullDescription = activityTitle;
+            if (description && description.toLowerCase() !== activityTitle.toLowerCase()) {
+                fullDescription += (fullDescription ? ": " : "") + description;
+            }
+            
+            if (fullDescription) {
+                 report.activities.push({ description: fullDescription });
+            }
+
+            const imgEl = $(tr_el).find('img[src*="tadpoles.com/m/p/"]');
+            if (imgEl.length) {
+                const imgSrc = imgEl.attr('src');
+                if (imgSrc && !report.photos.some(p => p.src === imgSrc)) {
+                     report.photos.push({
+                        src: imgSrc,
+                        description: activityTitle || "Activity photo" 
+                    });
+                }
+            }
+        });
+    } else {
+         logger.debug("parseGoddardViaTadpolesReport: Activities section not found.");
+    }
+
+
+    // --- Photos (Snapshots) ---
+    const photosHeading = contentArea.find(`${sectionHeadingsBaseSelector}:contains("SNAPSHOTS")`).first();
+    if (photosHeading.length) {
+        photosHeading.next('table').find('tr').each((i, tr_el) => {
+            const imgEl = $(tr_el).find('img[src*="tadpoles.com/m/p/"]');
+            const imgSrc = imgEl.attr('src');
+
+            if (imgSrc && !report.photos.some(p => p.src === imgSrc)) { 
+                let description = "";
+                const descContainer = $(tr_el).find('td').last(); 
+                const titleSpan = descContainer.find('span[style*="font-weight:bold"]').first();
+                // The description detail is often in a div > span after the bold title span
+                const detailEl = titleSpan.next('div').find('span[style*="font-size:13px"]').first();
+                
+                description = titleSpan.text().trim();
+                if (detailEl.length && detailEl.text().trim() && detailEl.text().trim() !== '&nbsp;') {
+                    description += (description ? " - " : "") + detailEl.text().trim();
+                } else if (!detailEl.length && titleSpan.next('div').text().trim() && titleSpan.next('div').text().trim() !== '&nbsp;') {
+                    // Fallback if structure is just title + div with text
+                     description += (description ? " - " : "") + titleSpan.next('div').text().trim();
+                }
+                
+                report.photos.push({
+                    src: imgSrc,
+                    description: description || "Snapshot"
+                });
+            }
+        });
+    } else {
+         logger.debug("parseGoddardViaTadpolesReport: Snapshots section not found.");
+    }
+
+
+    // Ensure critical fields are present, otherwise return null
+    if (!report.childName || !report.reportDate) {
+        logger.warn("parseGoddardViaTadpolesReport: Missing critical information (childName or reportDate), returning null.");
+        return null;
+    }
+
+    logger.info({ childName: report.childName, reportDate: report.reportDate, activitiesCount: report.activities.length, photoCount: report.photos.length }, "parseGoddardViaTadpolesReport: Finished parsing Goddard report data.");
+    return report;
+};
+
+/**
+ * Placeholder parser for Montessori school reports.
+ * @param htmlContent The HTML string.
+ * @param logger The logger instance to use for logging.
+ * @returns Always returns null as it's not yet implemented.
+ */
+export const parseMontessoriReport: ReportParser = (htmlContent: string, logger: pino.Logger): ParsedReport | null => {
+    logger.info("parseMontessoriReport: Montessori parser not yet implemented. Skipping.");
+    return null;
+};
 
 
 /**
@@ -301,7 +591,8 @@ export function formatTime(timeStr: string | undefined | null): string | null {
     const date = new Date(`1970-01-01 ${normalizedTime}`);
 
     if (isNaN(date.getTime())) {
-        logger.warn(`Could not parse time string: ${timeStr}`);
+        // Use globalLogger here as this function is generic and not part of a specific parsing strategy
+        globalLogger.warn(`Could not parse time string: ${timeStr}`);
         return null; // Return null if parsing failed
     }
 

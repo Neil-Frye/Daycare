@@ -51,23 +51,55 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    // List recent messages from the target sender
-    // TODO: Make these configurable via environment variables:
-    // - SENDER_DOMAIN: Email domain to filter messages from (e.g. @tadpoles.com)
-    // - MAX_MESSAGES: Number of messages to process per request
+    // Fetch user's configured daycare providers from Supabase
+    let userProviderConfigs: any[] = []; // To store the full config objects
+    let query = '';
+
+    try {
+        // Fetch all relevant fields for UserDaycareProviderConfig
+        const { data: providers, error: dbError } = await supabase
+            .from('user_daycare_providers')
+            .select('report_sender_email, parser_strategy') // Select needed fields
+            .eq('user_id', userId);
+
+        if (dbError) {
+            logger.error({ userId, route: '/api/gmail/fetch', error: dbError.message }, "Error fetching daycare providers from Supabase.");
+            return NextResponse.json({ error: 'Failed to retrieve daycare provider configurations.' }, { status: 500 });
+        }
+
+        if (!providers || providers.length === 0) {
+            logger.info({ userId, route: '/api/gmail/fetch' }, "No daycare providers configured for this user.");
+            return NextResponse.json({ message: 'No daycare providers configured. Please add a provider in settings.' }, { status: 200 });
+        }
+        
+        userProviderConfigs = providers; // Store the fetched configurations
+
+        // Construct the Gmail query string dynamically from fetched providers
+        const senderEmails = providers.map(p => `from:${p.report_sender_email}`);
+        query = senderEmails.join(' OR ');
+
+    } catch (e: any) {
+        logger.error({ userId, route: '/api/gmail/fetch', error: e.message || String(e) }, "Unexpected error fetching daycare providers.");
+        return NextResponse.json({ error: 'An unexpected error occurred while retrieving provider configurations.' }, { status: 500 });
+    }
+    
+    logger.info({ userId, route: '/api/gmail/fetch', query, providerConfigCount: userProviderConfigs.length }, "Constructed Gmail query from user's configured providers.");
+
+    // List recent messages from the configured senders
+    // TODO: Make MAX_MESSAGES configurable via environment variables.
     const listResponse = await gmail.users.messages.list({
         userId: 'me',
-        q: 'from:@tadpoles.com', // Consider making domain configurable
+        q: query, // Use the dynamically constructed query
         maxResults: 10, // Fetch a few more in case some are skipped
     });
 
     const messageItems = listResponse.data.messages || [];
     if (messageItems.length === 0) {
-        logger.info({ userId, route: '/api/gmail/fetch' }, "No new messages found from @tadpoles.com.");
-        return NextResponse.json({ message: 'No new messages found from @tadpoles.com.' });
+        logger.info({ userId, route: '/api/gmail/fetch', query }, "No new messages found for the user's configured senders.");
+        return NextResponse.json({ message: "No new messages found based on your provider configurations." });
     }
 
-    logger.info({ userId, route: '/api/gmail/fetch', count: messageItems.length }, "Found messages to process.");
+    logger.info({ userId, route: '/api/gmail/fetch', query, count: messageItems.length }, "Found messages to process.");
 
     /**
      * Process each message through the Gmail processor pipeline
@@ -87,7 +119,8 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
                 logger.warn({ userId, route: '/api/gmail/fetch' }, "Found message item without ID.");
                 return Promise.resolve({ status: ProcessMessageStatus.Error, messageId: 'unknown', error: 'Missing message ID' });
             }
-            return processGmailMessage(gmail, supabase, messageItem.id, userId);
+            // Pass userProviderConfigs to processGmailMessage
+            return processGmailMessage(gmail, supabase, messageItem.id, userId, userProviderConfigs);
         })
     );
 
@@ -96,6 +129,7 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
     let skippedExistsCount = 0;
     let skippedChildNotFoundCount = 0;
     let skippedInvalidDataCount = 0;
+    let skippedNoParserFoundCount = 0; // Added for the new status
     let errorCount = 0;
     const errors: { messageId: string, error?: string }[] = [];
 
@@ -117,6 +151,11 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
                      skippedInvalidDataCount++;
                      errors.push({ messageId: data.messageId, error: data.error });
                      break;
+                case ProcessMessageStatus.SkippedNoParserFound: // Handle new status
+                    skippedNoParserFoundCount++;
+                    // Optionally add to errors if you want to surface this to the user more directly
+                    // errors.push({ messageId: data.messageId, error: data.error }); 
+                    break;
                 case ProcessMessageStatus.Error:
                     errorCount++;
                     errors.push({ messageId: data.messageId, error: data.error });
@@ -136,6 +175,7 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
         skippedAlreadyExists: skippedExistsCount,
         skippedChildNotFound: skippedChildNotFoundCount,
         skippedInvalidData: skippedInvalidDataCount,
+        skippedNoParserFound: skippedNoParserFoundCount, // Added to summary
         errorsEncountered: errorCount,
         errorDetails: errors // Include details for debugging on the client if needed
     };
