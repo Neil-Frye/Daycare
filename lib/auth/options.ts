@@ -6,8 +6,8 @@ import GoogleProvider from 'next-auth/providers/google';
 if (!process.env.GOOGLE_CLIENT_ID) {
   throw new Error('Missing environment variable GOOGLE_CLIENT_ID');
 }
-if (!process.env.GOOGLE_SECRET_ID) {
-  throw new Error('Missing environment variable GOOGLE_SECRET_ID');
+if (!process.env.GOOGLE_CLIENT_SECRET) { // Corrected variable name
+  throw new Error('Missing environment variable GOOGLE_CLIENT_SECRET');
 }
 if (!process.env.NEXTAUTH_SECRET) {
   throw new Error('Missing environment variable NEXTAUTH_SECRET');
@@ -19,7 +19,7 @@ export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_SECRET_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET, // Corrected variable name
       authorization: {
         params: {
           scope: 'openid email profile https://www.googleapis.com/auth/gmail.readonly',
@@ -77,19 +77,58 @@ export const authOptions: NextAuthOptions = {
         delete token.error;
       }
 
-      // TODO: Implement token refresh logic here
-      // Example placeholder: Check if token is expired
-      // if (token.expiresAt && Date.now() >= token.expiresAt) {
-      //   console.log("Access token expired, attempting refresh...");
-      //   // Call refresh function
-      //   // return refreshAccessToken(token); // Implement this function
-      // }
+      // Check if the token is expired or nearing expiration (e.g., within 60 seconds)
+      if (token.expiresAt && Date.now() >= (token.expiresAt as number) - 60 * 1000) {
+        if (!token.refreshToken) {
+          console.error('No refresh token available, cannot refresh.');
+          token.error = 'NoRefreshTokenError';
+          return token;
+        }
 
+        console.log('Access token expired or nearing expiration, attempting refresh...');
+        try {
+          const response = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+              client_id: process.env.GOOGLE_CLIENT_ID!,
+              client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+              refresh_token: token.refreshToken as string,
+              grant_type: 'refresh_token',
+            }),
+          });
+
+          const refreshedTokens = await response.json();
+
+          if (!response.ok) {
+            console.error('Error refreshing access token:', refreshedTokens);
+            token.error = refreshedTokens.error || 'RefreshAccessTokenError';
+            // Potentially clear accessToken and expiresAt if refresh fails critically
+            // delete token.accessToken;
+            // delete token.expiresAt; 
+            return token; // Return token with error, session callback will handle it
+          }
+
+          console.log('Access token refreshed successfully.');
+          token.accessToken = refreshedTokens.access_token;
+          token.expiresAt = Date.now() + refreshedTokens.expires_in * 1000;
+          // Update refresh token if Google sends a new one (rare for Google, but good practice)
+          token.refreshToken = refreshedTokens.refresh_token ?? token.refreshToken;
+          delete token.error; // Clear any previous error
+
+        } catch (error) {
+          console.error('Error during token refresh request:', error);
+          token.error = 'RefreshAccessTokenRequestFailed';
+          return token;
+        }
+      }
       return token;
     },
     async session({ session, token }: { session: Session; token: JWT }): Promise<Session> {
       session.accessToken = token.accessToken;
-      session.error = token.error;
+      session.error = token.error as string | undefined; // Ensure type compatibility
       // Add user ID from token to session
       if (token.sub && session.user) {
         session.user.id = token.sub;

@@ -85,12 +85,26 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
     
     logger.info({ userId, route: '/api/gmail/fetch', query, providerConfigCount: userProviderConfigs.length }, "Constructed Gmail query from user's configured providers.");
 
+    // Determine maxResults for Gmail API list call
+    const defaultMaxMessages = 10;
+    let maxMessages = defaultMaxMessages;
+    const envMaxMessages = process.env.GMAIL_FETCH_MAX_MESSAGES;
+
+    if (envMaxMessages) {
+        const parsedMaxMessages = parseInt(envMaxMessages, 10);
+        if (!isNaN(parsedMaxMessages) && parsedMaxMessages > 0) {
+            maxMessages = parsedMaxMessages;
+        } else {
+            logger.warn({ userId, route: '/api/gmail/fetch', envValue: envMaxMessages }, `Invalid GMAIL_FETCH_MAX_MESSAGES value. Using default: ${defaultMaxMessages}.`);
+        }
+    }
+    logger.info({ userId, route: '/api/gmail/fetch', maxMessagesToFetch: maxMessages }, "Determined max messages to fetch.");
+
     // List recent messages from the configured senders
-    // TODO: Make MAX_MESSAGES configurable via environment variables.
     const listResponse = await gmail.users.messages.list({
         userId: 'me',
         q: query, // Use the dynamically constructed query
-        maxResults: 10, // Fetch a few more in case some are skipped
+        maxResults: maxMessages, 
     });
 
     const messageItems = listResponse.data.messages || [];
@@ -129,7 +143,8 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
     let skippedExistsCount = 0;
     let skippedChildNotFoundCount = 0;
     let skippedInvalidDataCount = 0;
-    let skippedNoParserFoundCount = 0; // Added for the new status
+    let skippedNoParserFoundCount = 0;
+    let skippedAmbiguousChildMatchCount = 0; // New counter
     let errorCount = 0;
     const errors: { messageId: string, error?: string }[] = [];
 
@@ -154,7 +169,11 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
                 case ProcessMessageStatus.SkippedNoParserFound: // Handle new status
                     skippedNoParserFoundCount++;
                     // Optionally add to errors if you want to surface this to the user more directly
-                    // errors.push({ messageId: data.messageId, error: data.error }); 
+                    // errors.push({ messageId: data.messageId, error: data.error });
+                    break;
+                case ProcessMessageStatus.SkippedAmbiguousChildMatch: // Handle new status
+                    skippedAmbiguousChildMatchCount++;
+                    errors.push({ messageId: data.messageId, error: data.error }); // Good to provide details of ambiguity
                     break;
                 case ProcessMessageStatus.Error:
                     errorCount++;
@@ -175,7 +194,8 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
         skippedAlreadyExists: skippedExistsCount,
         skippedChildNotFound: skippedChildNotFoundCount,
         skippedInvalidData: skippedInvalidDataCount,
-        skippedNoParserFound: skippedNoParserFoundCount, // Added to summary
+        skippedNoParserFound: skippedNoParserFoundCount,
+        skippedAmbiguousChildMatch: skippedAmbiguousChildMatchCount, // Added to summary
         errorsEncountered: errorCount,
         errorDetails: errors // Include details for debugging on the client if needed
     };

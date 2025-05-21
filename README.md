@@ -60,6 +60,13 @@ NEXTAUTH_URL=http://localhost:3000
 # Google OAuth
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
+
+# Gmail Integration (Optional)
+# GMAIL_FETCH_MAX_MESSAGES=10 # Max number of emails to fetch from Gmail per run by the API
+# Note: The default is 10 if not specified.
+
+# Logging Level (Optional)
+# LOG_LEVEL=info # Options: error, warn, info, debug
 ```
 
 ## Development
