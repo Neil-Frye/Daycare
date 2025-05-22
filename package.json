@@ -10,7 +10,8 @@
     "build:test": "cp .env.test .env && next build",
     "build:prod": "cp .env.prod .env && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "analyze": "ANALYZE=true next build"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -80,5 +81,8 @@
     "typescript": "^5.8.3",
     "vaul": "^0.9.9",
     "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@next/bundle-analyzer": "^15.3.2"
   }
 }

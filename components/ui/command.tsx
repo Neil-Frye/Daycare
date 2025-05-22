@@ -23,7 +23,12 @@ const Command = React.forwardRef<
 ));
 Command.displayName = CommandPrimitive.displayName;
 
-interface CommandDialogProps extends DialogProps {}
+interface CommandDialogProps extends DialogProps {
+  // Explicitly define children to match the type expected by cmdk's Command or its underlying React version
+  // This can be React.ReactNode or a more specific type if cmdk requires it.
+  // Given the error, let's try to align with CommandPrimitive's expected children type.
+  children?: React.ComponentProps<typeof CommandPrimitive>['children'];
+}
 
 const CommandDialog = ({ children, ...props }: CommandDialogProps) => {
   return (

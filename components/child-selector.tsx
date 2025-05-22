@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react'; // Removed useState, useEffect
+import React, { memo } from 'react'; // Added memo
 import {
   Select,
   SelectContent,
@@ -8,35 +8,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-// Removed supabase import as it's no longer needed here
-import { type Database, type Tables } from '@/lib/supabase/types'; // Keep type import
+import { type Tables } from '@/lib/supabase/types';
 
-// Use the generated type
 type Child = Tables<'children'>;
 
-// Updated props interface
 interface ChildSelectorProps {
-  children: Child[]; // Accept children list as prop
-  selectedChildId: string | null; // Accept selected ID as prop
-  onChildChange: (childId: string) => void; // Renamed prop for clarity
-  // Add optional placeholder prop if needed
+  children: Child[];
+  selectedChildId: string | null;
+  onChildChange: (childId: string) => void;
   placeholder?: string;
-  className?: string; // Allow passing className
+  className?: string;
 }
 
-export function ChildSelector({
+// Original component, renamed to avoid export conflict
+function ChildSelectorComponent({
   children,
   selectedChildId,
   onChildChange,
   placeholder = "Select a child",
-  className = "w-[200px]", // Default width
+  className = "w-[200px]",
 }: ChildSelectorProps) {
 
-  // Loading state and error handling should be managed by the parent component
-
   if (children.length === 0) {
-    // Parent should handle the case where there are no children to pass
-    // Or display a minimal state here
     return (
        <div className={`${className} h-10 flex items-center justify-center border rounded-md`}>
          <span className="text-sm text-gray-500">No children available</span>
@@ -46,11 +39,9 @@ export function ChildSelector({
 
   return (
     <Select
-      // Use the selectedChildId prop, ensuring it's a string or undefined for the Select component
       value={selectedChildId ?? ""}
       onValueChange={(value) => {
-        // Call the callback function passed from the parent
-        if (value) { // Ensure value is not empty string if placeholder is selected
+        if (value) {
             onChildChange(value);
         }
       }}
@@ -59,7 +50,6 @@ export function ChildSelector({
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
-        {/* Map over the children prop */}
         {children.map((child) => (
           <SelectItem key={child.id} value={child.id}>
             {child.name}
@@ -69,3 +59,6 @@ export function ChildSelector({
     </Select>
   );
 }
+
+// Export the memoized version with the original name
+export const ChildSelector = memo(ChildSelectorComponent);

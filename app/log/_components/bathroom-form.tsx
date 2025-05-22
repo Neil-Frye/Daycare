@@ -24,8 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
-// TODO: Add Date/Time Picker component if not already available
-// import { DateTimePicker } from '@/components/ui/datetime-picker';
+import { DateTimePicker } from '@/components/ui/datetime-picker'; // Import the new component
 
 // Define the schema for validation
 const bathroomFormSchema = z.object({
@@ -64,43 +63,50 @@ export default function BathroomForm({ childId }: BathroomFormProps) { // Use th
         });
         return;
     }
+    // 1. Store form data and reset early
+    const currentFormData = form.getValues();
+    form.reset();
     setIsLoading(true);
-    console.log('Submitting Bathroom Data:', { ...data, childId });
+
+    console.log('Submitting Bathroom Data (optimistic):', { ...currentFormData, childId });
 
     try {
+      // 2. API Call (use currentFormData)
       const response = await fetch('/api/log', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'bathroom', // API discriminator
           childId: childId,
-          time: data.time.toISOString(),
-          eventType: data.type, // Map form 'type' to API 'eventType'
-          notes: data.notes,
+          time: currentFormData.time.toISOString(),
+          eventType: currentFormData.type, // Map form 'type' to API 'eventType'
+          notes: currentFormData.notes,
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData: { error?: string; [key: string]: any; } = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
+      // 3. Success Handling
+      const result: { message?: string; [key: string]: any; } = await response.json();
       toast({
         title: 'Bathroom Event Logged',
         description: result.message || 'The event details have been saved.',
       });
-      form.reset(); // Reset form after successful submission
+      // Form is already reset.
     } catch (error) {
+      // 4. Error Handling and Reversion
       console.error('Error logging bathroom event:', error);
       toast({
         title: 'Error Logging Bathroom Event',
-        description: error instanceof Error ? error.message : 'Could not save event details. Please try again.',
+        description: error instanceof Error ? error.message : 'Could not save. Please try again.',
         variant: 'destructive',
       });
+      form.reset(currentFormData); // Restore form data on error
     } finally {
+      // 5. Loading State
       setIsLoading(false);
     }
   }
@@ -116,21 +122,11 @@ export default function BathroomForm({ childId }: BathroomFormProps) { // Use th
             <FormItem>
               <FormLabel>Time</FormLabel>
               <FormControl>
-                {/* Using Input type="datetime-local" as a temporary measure */}
-                <Input
-                  type="datetime-local"
-                  onChange={(e) => {
-                    const dateValue = e.target.value ? new Date(e.target.value) : null;
-                    if (dateValue && !isNaN(dateValue.getTime())) {
-                      field.onChange(dateValue);
-                    } else {
-                      field.onChange(null);
-                    }
-                  }}
-                  // value={field.value ? field.value.toISOString().slice(0, 16) : ''}
+                <DateTimePicker
+                  date={field.value}
+                  setDate={field.onChange}
                   disabled={isLoading}
                 />
-                {/* <DateTimePicker date={field.value} setDate={field.onChange} disabled={isLoading} /> */}
               </FormControl>
               <FormDescription>When the bathroom event occurred.</FormDescription>
               <FormMessage />

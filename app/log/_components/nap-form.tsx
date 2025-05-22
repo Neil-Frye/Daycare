@@ -14,11 +14,10 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/components/ui/input'; // Keep for other fields if any, or remove if not used
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
-// TODO: Add Date/Time Picker component if not already available
-// import { DateTimePicker } from '@/components/ui/datetime-picker';
+import { DateTimePicker } from '@/components/ui/datetime-picker'; // Import the new component
 
 // Define the schema for validation
 const napFormSchema = z.object({
@@ -57,43 +56,50 @@ export default function NapForm({ childId }: NapFormProps) { // Use the prop
         });
         return;
     }
+    // 1. Store form data and reset early
+    const currentFormData = form.getValues();
+    form.reset();
     setIsLoading(true);
-    console.log('Submitting Nap Data:', { ...data, childId });
+
+    console.log('Submitting Nap Data (optimistic):', { ...currentFormData, childId });
 
     try {
+      // 2. API Call (use currentFormData)
       const response = await fetch('/api/log', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'nap', // Match the API schema discriminator
           childId: childId,
-          startTime: data.startTime.toISOString(), // Send as ISO string
-          endTime: data.endTime.toISOString(),     // Send as ISO string
-          notes: data.notes,
+          startTime: currentFormData.startTime.toISOString(), // Send as ISO string
+          endTime: currentFormData.endTime.toISOString(),     // Send as ISO string
+          notes: currentFormData.notes,
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData: { error?: string; [key: string]: any; } = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
+      // 3. Success Handling
+      const result: { message?: string; [key: string]: any; } = await response.json();
       toast({
         title: 'Nap Logged',
         description: result.message || 'The nap details have been saved.',
       });
-      form.reset(); // Reset form after successful submission
+      // Form is already reset.
     } catch (error) {
+      // 4. Error Handling and Reversion
       console.error('Error logging nap:', error);
       toast({
         title: 'Error Logging Nap',
-        description: error instanceof Error ? error.message : 'Could not save nap details. Please try again.',
+        description: error instanceof Error ? error.message : 'Could not save. Please try again.',
         variant: 'destructive',
       });
+      form.reset(currentFormData); // Restore form data on error
     } finally {
+      // 5. Loading State
       setIsLoading(false);
     }
   }
@@ -109,23 +115,11 @@ export default function NapForm({ childId }: NapFormProps) { // Use the prop
             <FormItem>
               <FormLabel>Start Time</FormLabel>
               <FormControl>
-                {/* Using Input type="datetime-local" as a temporary measure */}
-                {/* Need to handle value conversion carefully if using datetime-local */}
-                <Input
-                  type="datetime-local"
-                  onChange={(e) => {
-                    // Ensure a valid date is created before calling field.onChange
-                    const dateValue = e.target.value ? new Date(e.target.value) : null;
-                    if (dateValue && !isNaN(dateValue.getTime())) {
-                      field.onChange(dateValue);
-                    } else {
-                      field.onChange(null); // Or handle invalid input appropriately
-                    }
-                  }}
-                  // value={field.value ? field.value.toISOString().slice(0, 16) : ''} // Formatting for datetime-local
+                <DateTimePicker
+                  date={field.value}
+                  setDate={field.onChange}
                   disabled={isLoading}
                 />
-                {/* <DateTimePicker date={field.value} setDate={field.onChange} disabled={isLoading} /> */}
               </FormControl>
               <FormDescription>When the nap started.</FormDescription>
               <FormMessage />
@@ -139,21 +133,11 @@ export default function NapForm({ childId }: NapFormProps) { // Use the prop
             <FormItem>
               <FormLabel>End Time</FormLabel>
               <FormControl>
-                 {/* Using Input type="datetime-local" as a temporary measure */}
-                 <Input
-                  type="datetime-local"
-                  onChange={(e) => {
-                    const dateValue = e.target.value ? new Date(e.target.value) : null;
-                    if (dateValue && !isNaN(dateValue.getTime())) {
-                      field.onChange(dateValue);
-                    } else {
-                      field.onChange(null);
-                    }
-                  }}
-                  // value={field.value ? field.value.toISOString().slice(0, 16) : ''} // Formatting for datetime-local
+                <DateTimePicker
+                  date={field.value}
+                  setDate={field.onChange}
                   disabled={isLoading}
                 />
-                {/* <DateTimePicker date={field.value} setDate={field.onChange} disabled={isLoading} /> */}
               </FormControl>
               <FormDescription>When the nap ended.</FormDescription>
               <FormMessage />

@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,6 +13,9 @@ import {
 import Link from 'next/link';
 import { ChildSelector } from '@/components/child-selector';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { QuickLogCard } from '@/components/dashboard/quick-log-card';
+import { TodaysScheduleCard } from '@/components/dashboard/todays-schedule-card';
+import { ChildProgressCard } from '@/components/dashboard/child-progress-card';
 import supabaseClient from '@/lib/supabase/client';
 import { type Tables } from '@/lib/supabase/types';
 import Image from 'next/image'; // Import Image component
@@ -27,14 +31,26 @@ const PlaceholderChart = ({ type = 'line' }: { type?: 'line' | 'bar' }) => (
   </div>
 );
 
-const CircularProgress = ({ value, label }: { value: string, label: string }) => (
-    <div className="flex flex-col items-center">
-        <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center border-4 border-green-300 mb-2">
-            <span className="text-green-700 font-semibold text-lg">{value}</span>
-        </div>
-        <span className="text-sm text-gray-600">{label}</span>
-    </div>
+const DynamicPlaceholderChart = dynamic(() =>
+  Promise.resolve(PlaceholderChart),
+  {
+    loading: (): JSX.Element => <p role="status" className="text-sm text-gray-500">Loading chart...</p>,
+    ssr: false
+  }
 );
+
+// CircularProgress has been moved to components/ui/circular-progress.tsx
+// const CircularProgress = memo(function CircularProgress({ value, label }: { value: string, label: string }) {
+//   return (
+//     <div className="flex flex-col items-center">
+//         <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center border-4 border-green-300 mb-2">
+//             <span className="text-green-700 font-semibold text-lg">{value}</span>
+//         </div>
+//         <span className="text-sm text-gray-600">{label}</span>
+//     </div>
+//   );
+// });
+// CircularProgress.displayName = 'CircularProgress';
 
 export default function Home() {
   const { data: session, status } = useSession();
@@ -43,9 +59,10 @@ export default function Home() {
   const [isLoadingChildren, setIsLoadingChildren] = useState(true);
   const [selectedChild, setSelectedChild] = useState<Child | null>(null); // Store selected child object
 
+  // Effect for fetching children list
   useEffect(() => {
     if (status === 'authenticated') {
-      const fetchChildren = async () => {
+      const fetchChildrenList = async () => {
         setIsLoadingChildren(true);
         const { data, error } = await supabaseClient
           .from('children')
@@ -57,36 +74,40 @@ export default function Home() {
           setChildren([]);
         } else {
           setChildren(data || []);
+          // Logic to set initial selectedChildId if none is set or current is invalid
           if (data && data.length > 0) {
-            // If no child is selected, or the previously selected one isn't in the list anymore, select the first one.
             const currentSelectionValid = selectedChildId && data.some(c => c.id === selectedChildId);
             if (!currentSelectionValid) {
               setSelectedChildId(data[0].id);
-              setSelectedChild(data[0]); // Also set the selected child object
-            } else {
-              // Update selected child object in case details changed
-              setSelectedChild(data.find(c => c.id === selectedChildId) || null);
             }
           } else {
-            setSelectedChildId(null); // No children
-            setSelectedChild(null);
+            setSelectedChildId(null);
           }
         }
         setIsLoadingChildren(false);
       };
-      fetchChildren();
+      fetchChildrenList();
     } else {
       setChildren([]);
       setSelectedChildId(null);
-      setSelectedChild(null);
       setIsLoadingChildren(false);
     }
-  }, [status, selectedChildId]); // Re-run if status changes or selectedChildId is programmatically changed
+  }, [status]); // Removed selectedChildId from here
 
-  const handleChildChange = (childId: string) => {
+  // Effect for updating the selectedChild object
+  useEffect(() => {
+    if (selectedChildId && children.length > 0) {
+      const child = children.find(c => c.id === selectedChildId);
+      setSelectedChild(child || null);
+    } else {
+      setSelectedChild(null);
+    }
+  }, [selectedChildId, children]); // Runs when selectedChildId or children list changes
+
+  const handleChildChange = useCallback((childId: string) => {
     setSelectedChildId(childId);
-    setSelectedChild(children.find(c => c.id === childId) || null);
-  };
+    // setSelectedChild(children.find(c => c.id === childId) || null); // This line is removed as the new useEffect handles it.
+  }, []); // setSelectedChildId is stable
 
   // Mock data for display based on the design
   const mockChildPhotoUrl = '/placeholder-child.jpg'; // Replace with actual logic if available
@@ -98,10 +119,10 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
           <div className="flex justify-between items-center">
             {/* Logo */}
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-orange-500 rounded-full"></div>
+            <Link href="/" className="flex items-center gap-2" aria-label="Go to homepage">
+              <div className="w-8 h-8 bg-orange-500 rounded-full" aria-hidden="true"></div>
               <span className="font-bold text-xl text-gray-800">Logo</span>
-            </div>
+            </Link>
 
             {/* Right side: User Info / Auth */}
             <div className="flex items-center gap-4">
@@ -117,7 +138,7 @@ export default function Home() {
                     {session.user?.name ? session.user.name.split(' ')[0] : 'User'}
                   </span>
                   {/* Placeholder for User Menu */}
-                  <Button variant="ghost" size="icon">
+                  <Button variant="ghost" size="icon" aria-label="User menu">
                     <MoreVertical className="h-5 w-5" />
                   </Button>
                    <Button variant="outline" size="sm" onClick={() => signOut()}>
@@ -134,7 +155,7 @@ export default function Home() {
         {status === 'authenticated' ? (
           <>
             {/* Child Selector - Placed prominently near the top */}
-             <div className="mb-6">
+             <div className="mb-6" aria-live="polite" aria-busy={isLoadingChildren}>
                 <ErrorBoundary
                   fallback={
                     <div className="w-full md:w-[250px] h-10 bg-red-50 border border-red-200 rounded-md flex items-center justify-center text-red-500 text-sm">
@@ -180,10 +201,10 @@ export default function Home() {
                 {/* Child Photo Card (Span 1 column) */}
                 <Card className="md:col-span-1 lg:col-span-1 bg-orange-50 overflow-hidden">
                   <CardHeader className="flex flex-row items-center justify-between p-3 bg-orange-100">
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" aria-label="Previous child photo view">
                       <ArrowLeft className="h-5 w-5 text-orange-700" />
                     </Button>
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" aria-label="Options for child photo">
                       <MoreVertical className="h-5 w-5 text-orange-700" />
                     </Button>
                   </CardHeader>
@@ -195,144 +216,47 @@ export default function Home() {
                         width={300}
                         height={300}
                         className="object-cover w-full h-full"
-                        onError={(e) => e.currentTarget.src = '/placeholder-child-error.png'} // Fallback image
+                        onError={(e: React.SyntheticEvent<HTMLImageElement, Event>) => e.currentTarget.src = '/placeholder-child-error.png'} // Fallback image
                       />
                   </CardContent>
                 </Card>
 
                 {/* Quick Actions Card (Span 1 column) */}
-                <Card className="md:col-span-1 lg:col-span-1 bg-green-50">
-                  <CardHeader className="flex flex-row items-center justify-between p-3">
-                    <CardTitle className="text-base font-medium text-green-800">Quick Log</CardTitle>
-                    <Button variant="ghost" size="icon">
-                      <MoreVertical className="h-5 w-5 text-green-700" />
-                    </Button>
-                  </CardHeader>
-                  <CardContent className="p-4">
-                    <div className="grid grid-cols-3 gap-3 mb-4">
-                      <Button variant="outline" className="flex flex-col h-16 items-center justify-center bg-white border-green-200 hover:bg-green-100">
-                        <Utensils className="h-5 w-5 text-green-600 mb-1" />
-                        <span className="text-xs">Meal</span>
-                      </Button>
-                      <Button variant="outline" className="flex flex-col h-16 items-center justify-center bg-white border-green-200 hover:bg-green-100">
-                        <Bed className="h-5 w-5 text-green-600 mb-1" />
-                        <span className="text-xs">Nap</span>
-                      </Button>
-                      <Button variant="outline" className="flex flex-col h-16 items-center justify-center bg-white border-green-200 hover:bg-green-100">
-                        <ToyBrick className="h-5 w-5 text-green-600 mb-1" />
-                        <span className="text-xs">Activity</span>
-                      </Button>
-                      <Button variant="outline" className="flex flex-col h-16 items-center justify-center bg-white border-green-200 hover:bg-green-100">
-                        <Smile className="h-5 w-5 text-green-600 mb-1" />
-                        <span className="text-xs">Mood</span>
-                      </Button>
-                      <Button variant="outline" className="flex flex-col h-16 items-center justify-center bg-white border-green-200 hover:bg-green-100">
-                        <MessageSquare className="h-5 w-5 text-green-600 mb-1" />
-                        <span className="text-xs">Note</span>
-                      </Button>
-                       <Button variant="outline" className="flex flex-col h-16 items-center justify-center bg-white border-green-200 hover:bg-green-100">
-                        <CheckCircle className="h-5 w-5 text-green-600 mb-1" />
-                        <span className="text-xs">Diaper</span>
-                      </Button>
-                    </div>
-                    <div className="flex gap-3">
-                      <Button className="flex-1 bg-orange-400 hover:bg-orange-500 text-white">
-                        View Log
-                      </Button>
-                      <Button variant="outline" className="flex-1 border-orange-400 text-orange-600 hover:bg-orange-50">
-                        <Plus className="mr-1 h-4 w-4" /> Add Entry
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <QuickLogCard />
 
                 {/* Notification Card (Span 1 column) */}
                 <Card className="md:col-span-1 lg:col-span-1">
                   <CardHeader className="flex flex-row items-center justify-between p-3">
                     <CardTitle className="text-base font-medium">Notifications</CardTitle>
-                    <div className="flex items-center gap-1 text-sm font-semibold text-green-600">
+                    {/* Assuming this div is for a button or menu for notifications card options eventually */}
+                    <div className="flex items-center gap-1 text-sm font-semibold text-green-600" role="button" tabIndex={0} aria-label="Notification options placeholder"> 
                       <span>980</span>
                       <span className="text-xs text-gray-500">GC</span> {/* Placeholder */}
                     </div>
                   </CardHeader>
                   <CardContent className="p-4">
-                    <PlaceholderChart type="line" />
+                    <DynamicPlaceholderChart type="line" />
                   </CardContent>
                 </Card>
 
                 {/* Scheduling Card (Span 1 column) */}
-                 <Card className="md:col-span-1 lg:col-span-1">
-                  <CardHeader className="flex flex-row items-center gap-2 p-3">
-                    <CircleUserRound className="h-6 w-6 text-orange-500" />
-                    <CardTitle className="text-base font-medium">Today's Schedule</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-4 space-y-3">
-                    {/* Placeholder Schedule Items */}
-                    <div className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-gray-700">1</span>
-                            <span className="text-sm">Activity Name</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-500">
-                            <span>5 mins</span>
-                            <CheckCircle className="h-4 w-4 text-green-500" />
-                        </div>
-                    </div>
-                     <div className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-gray-700">2</span>
-                            <span className="text-sm">Diaper Change</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-500">
-                            <span>10 mins ago</span>
-                            <CheckCircle className="h-4 w-4 text-green-500" />
-                        </div>
-                    </div>
-                     <div className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-gray-700">3</span>
-                            <span className="text-sm">Nap Time</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-500">
-                            <span>Upcoming</span>
-                            <Clock className="h-4 w-4 text-blue-500" />
-                        </div>
-                    </div>
-                    {/* Add illustration placeholder if needed */}
-                    {/* <div className="mt-2 h-20 bg-orange-100 rounded flex items-center justify-center text-orange-400">Illustration Placeholder</div> */}
-                  </CardContent>
-                </Card>
+                <TodaysScheduleCard />
 
                 {/* Child Progress Card (Span 1 column) */}
-                <Card className="md:col-span-1 lg:col-span-1">
-                  <CardHeader className="flex flex-row items-center justify-between p-3">
-                    <div>
-                        <CardTitle className="text-base font-medium">Child Progress</CardTitle>
-                        <CardDescription className="text-xs">Summary</CardDescription>
-                    </div>
-                    <Button variant="ghost" size="icon">
-                      <MoreVertical className="h-5 w-5 text-gray-500" />
-                    </Button>
-                  </CardHeader>
-                  <CardContent className="p-4 flex justify-around items-center">
-                    {/* Placeholder Circular Progress */}
-                    <CircularProgress value="1/8" label="Meals" />
-                    <CircularProgress value="927" label="Steps" />
-                    <CircularProgress value="122" label="Mins Nap" />
-                  </CardContent>
-                </Card>
+                <ChildProgressCard />
 
                 {/* Analytics Card 1 (Span 1 column) */}
                 <Card className="md:col-span-1 lg:col-span-1">
                   <CardHeader className="flex flex-row items-center justify-between p-3">
                     <CardTitle className="text-base font-medium">Sleep Trends</CardTitle>
-                     <div className="flex items-center gap-1 text-sm font-semibold text-green-600">
+                     {/* Assuming this div is for a button or menu for sleep trends card options eventually */}
+                     <div className="flex items-center gap-1 text-sm font-semibold text-green-600" role="button" tabIndex={0} aria-label="Sleep trends options placeholder">
                       <span>432</span>
                       <span className="text-xs text-gray-500">GC</span> {/* Placeholder */}
                     </div>
                   </CardHeader>
                   <CardContent className="p-4">
-                    <PlaceholderChart type="line" />
+                    <DynamicPlaceholderChart type="line" />
                   </CardContent>
                 </Card>
 
@@ -340,13 +264,14 @@ export default function Home() {
                 <Card className="md:col-span-1 lg:col-span-1">
                   <CardHeader className="flex flex-row items-center justify-between p-3">
                     <CardTitle className="text-base font-medium">Activity Levels</CardTitle>
-                     <div className="flex items-center gap-1 text-sm font-semibold text-orange-600">
+                     {/* Assuming this div is for a button or menu for activity levels card options eventually */}
+                     <div className="flex items-center gap-1 text-sm font-semibold text-orange-600" role="button" tabIndex={0} aria-label="Activity levels options placeholder">
                       <span>800</span>
                       <span className="text-xs text-gray-500">GC</span> {/* Placeholder */}
                     </div>
                   </CardHeader>
                   <CardContent className="p-4">
-                    <PlaceholderChart type="bar" />
+                    <DynamicPlaceholderChart type="bar" />
                   </CardContent>
                 </Card>
 

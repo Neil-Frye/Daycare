@@ -14,11 +14,10 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/components/ui/input'; // Keep for other fields
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
-// TODO: Add Date/Time Picker component if not already available
-// import { DateTimePicker } from '@/components/ui/datetime-picker';
+import { DateTimePicker } from '@/components/ui/datetime-picker'; // Import the new component
 
 // Define the schema for validation
 const activityFormSchema = z.object({
@@ -55,42 +54,51 @@ export default function ActivityForm({ childId }: ActivityFormProps) { // Use th
         });
         return;
     }
-    setIsLoading(true);
-    console.log('Submitting Activity Data:', { ...data, childId });
+    // 1. Store form data and reset early
+    const currentFormData = form.getValues(); // Get all values
+    form.reset(); // Optimistically reset the form
+    setIsLoading(true); // Keep loading state for button
+    
+    // Optional: show a temporary "Submitting..." toast
+    // toast({ title: "Submitting activity..." });
+    console.log('Submitting Activity Data (optimistic):', { ...currentFormData, childId });
 
     try {
+      // 2. API Call (use currentFormData)
       const response = await fetch('/api/log', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'activity', // API discriminator
+          type: 'activity',
           childId: childId,
-          time: data.time.toISOString(),
-          description: data.description,
-          notes: data.notes,
+          time: currentFormData.time.toISOString(), // Use stored data
+          description: currentFormData.description,
+          notes: currentFormData.notes,
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData: { error?: string; [key: string]: any; } = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
+      // 3. Success Handling
+      const result: { message?: string; [key: string]: any; } = await response.json();
       toast({
         title: 'Activity Logged',
         description: result.message || 'The activity details have been saved.',
       });
-      form.reset(); // Reset form after successful submission
+      // Form is already reset. If you had a specific "Submitting" toast, clear it.
+
     } catch (error) {
+      // 4. Error Handling and Reversion
       console.error('Error logging activity:', error);
       toast({
         title: 'Error Logging Activity',
-        description: error instanceof Error ? error.message : 'Could not save activity details. Please try again.',
+        description: error instanceof Error ? error.message : 'Could not save. Please try again.',
         variant: 'destructive',
       });
+      form.reset(currentFormData); // Restore form data on error
     } finally {
       setIsLoading(false);
     }
@@ -107,21 +115,11 @@ export default function ActivityForm({ childId }: ActivityFormProps) { // Use th
             <FormItem>
               <FormLabel>Time</FormLabel>
               <FormControl>
-                {/* Using Input type="datetime-local" as a temporary measure */}
-                <Input
-                  type="datetime-local"
-                  onChange={(e) => {
-                    const dateValue = e.target.value ? new Date(e.target.value) : null;
-                    if (dateValue && !isNaN(dateValue.getTime())) {
-                      field.onChange(dateValue);
-                    } else {
-                      field.onChange(null);
-                    }
-                  }}
-                  // value={field.value ? field.value.toISOString().slice(0, 16) : ''}
+                <DateTimePicker
+                  date={field.value}
+                  setDate={field.onChange}
                   disabled={isLoading}
                 />
-                {/* <DateTimePicker date={field.value} setDate={field.onChange} disabled={isLoading} /> */}
               </FormControl>
               <FormDescription>When the activity occurred.</FormDescription>
               <FormMessage />
