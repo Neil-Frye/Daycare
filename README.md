@@ -4,11 +4,15 @@ A Next.js application that aggregates daily daycare reports from Gmail and provi
 
 ## Features
 
-- **Gmail Integration**: Fetches and processes daily reports from configured email domains
-- **Child Tracking**: Tracks activities, meals, sleep, and diaper changes
-- **Analytics Dashboard**: Visualizes historical trends and patterns
-- **Photo Gallery**: Stores and organizes photos from reports
-- **Family Sharing**: Allows inviting additional caregivers
+- **Multi-Provider Gmail Integration**: Fetches and processes daily reports from user-configured daycare providers. The system can parse emails from different providers, with current support for:
+    - Standard Tadpoles emails (`tadpoles_v1`)
+    - Goddard schools using the Tadpoles email format (`goddard_tadpoles_v1`)
+    - Placeholder for direct Montessori emails (`montessori_v1` - under development)
+- **Child Tracking**: Tracks activities, meals, sleep, and diaper changes.
+- **Analytics Dashboard**: Visualizes historical trends and patterns.
+- **Photo Gallery**: Stores and organizes photos from reports.
+- **Family Sharing**: Allows inviting additional caregivers.
+- **User-Configurable Providers**: Manage daycare provider settings, including sender emails and specific email parsing logic.
 
 ## Technology Stack
 
@@ -56,6 +60,13 @@ NEXTAUTH_URL=http://localhost:3000
 # Google OAuth
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
+
+# Gmail Integration (Optional)
+# GMAIL_FETCH_MAX_MESSAGES=10 # Max number of emails to fetch from Gmail per run by the API
+# Note: The default is 10 if not specified.
+
+# Logging Level (Optional)
+# LOG_LEVEL=info # Options: error, warn, info, debug
 ```
 
 ## Development
@@ -70,8 +81,26 @@ yarn dev
 
 - `app/`: Next.js app router routes
 - `lib/`: Shared utilities and business logic
+  - `lib/gmail/parser.ts`: Contains email parsing strategies.
+  - `lib/gmail/processor.ts`: Handles email processing pipeline and parser dispatch.
 - `supabase/`: Database migrations
 - `components/`: UI components
+- `app/settings/providers/`: UI for managing daycare provider configurations.
+
+## Configuring Daycare Providers
+
+Users can configure their daycare providers through the application settings, typically found at `/settings/providers`. This allows the system to correctly identify and parse daily reports from different sources.
+
+For each provider, you'll need to provide the following:
+
+-   **Provider Name**: A friendly name for your reference (e.g., "Goddard School Main St.", "My Tadpoles Center", "Montessori Downtown").
+-   **Report Sender Email**: The exact email address from which the daily reports are sent (e.g., "notifications@tadpoles.com", "reports@goddardexample.com", "updates@montessorischool.org"). This is crucial for identifying the correct emails.
+-   **Parser Strategy** (Optional): This is an advanced setting that tells the system how to interpret the content of the report emails. If left blank, the system will attempt to infer the correct parser based on the sender's email address or the provider name. Specifying a strategy can ensure accuracy. Available strategies include:
+    *   `tadpoles_v1`: For standard Tadpoles report emails.
+    *   `goddard_tadpoles_v1`: For Goddard schools that send reports using the Tadpoles email format.
+    *   `montessori_v1`: (Placeholder) Intended for direct Montessori email formats. *Note: This parser is currently a placeholder and not fully implemented pending diverse email samples.*
+
+Proper configuration ensures that reports are accurately fetched and processed.
 
 ## API Documentation
 
@@ -79,16 +108,28 @@ yarn dev
 
 **Endpoint**: `GET /api/gmail/fetch`
 
-Fetches and processes daycare reports from Gmail. See [app/api/gmail/fetch/route.ts](app/api/gmail/fetch/route.ts) for implementation details.
+Fetches and processes daycare reports from Gmail based on the user's configured daycare providers. See [app/api/gmail/fetch/route.ts](app/api/gmail/fetch/route.ts) for implementation details.
 
 **Flow**:
-1. Authenticates with Google OAuth
-2. Fetches messages from configured sender
-3. Processes each message through pipeline:
-   - Content extraction
-   - Data validation
-   - Child matching
-   - Database storage
+1. Authenticates with Google OAuth using the user's session.
+2. Retrieves the user's configured daycare providers (sender emails and parser strategies) from the database.
+3. Constructs a Gmail query based on these configured sender emails.
+4. Fetches recent messages matching the query.
+5. Processes each message through a pipeline:
+   - Determines the correct parser based on sender email, configured `parser_strategy`, or fallback logic (see `lib/gmail/processor.ts#getParserForProvider`).
+   - Content extraction using the selected parser.
+   - Data validation.
+   - Child matching.
+   - Database storage of parsed data (daily reports, naps, meals, activities, photos).
+
+### Provider Configuration API
+
+- `GET /api/user-daycare-providers`: Lists all provider configurations for the authenticated user.
+- `POST /api/user-daycare-providers`: Creates a new provider configuration.
+- `PUT /api/user-daycare-providers/[id]`: Updates an existing provider configuration.
+- `DELETE /api/user-daycare-providers/[id]`: Deletes a provider configuration.
+
+See [app/api/user-daycare-providers/route.ts](app/api/user-daycare-providers/route.ts) and [app/api/user-daycare-providers/[id]/route.ts](app/api/user-daycare-providers/[id]/route.ts) for details.
 
 ### Analytics Endpoints
 
@@ -98,6 +139,8 @@ Fetches and processes daycare reports from Gmail. See [app/api/gmail/fetch/route
 - Photos: `GET /api/analytics/photos`
 
 ## Testing
+
+Unit tests for email parsers and other core logic can be found in relevant `*.test.ts` files.
 
 Run tests with:
 
@@ -117,7 +160,15 @@ The application is configured for Vercel deployment. Ensure all environment vari
 
 ## Roadmap
 
-- [ ] Make Gmail query parameters configurable
-- [ ] Add batch processing for large message sets
-- [ ] Implement Google API token refresh
-- [ ] Add rate limiting
+- **Expand Parser Library**:
+    - Develop and refine parsers for more daycare systems and email formats (e.g., fully implement `montessori_v1`, add support for other Goddard email systems if they differ, Bright Horizons, etc.) based on available email samples.
+- **Configuration UI Enhancements**:
+    - Allow users to test a parser strategy with a sample email snippet directly in the UI.
+- **Gmail Integration Enhancements**:
+    - Add batch processing for large initial message sets.
+    - Implement Google API token refresh mechanisms more robustly if needed.
+    - Implement rate limiting for API calls.
+- **Advanced Analytics**:
+    - Offer more detailed insights and customizable reports.
+- **Notifications**:
+    - Alert users to important items noted in reports (e.g., "low on diapers").
