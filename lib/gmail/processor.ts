@@ -1,252 +1,342 @@
 import { google, gmail_v1 } from 'googleapis';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Database } from '@/lib/supabase/types'; // Adjust path as needed
-import logger from '@/lib/logger';
+import pino from 'pino';
+import logger from '@/lib/logger'; // Main logger
 import {
     base64UrlDecode,
     findHtmlPart,
-    parseReportData,
+    parseTadpolesReport,
+    parseGoddardViaTadpolesReport,
+    parseMontessoriReport,
     formatTime,
-    type ParsedReport
-} from './parser'; // Import parser functions
+    type ParsedReport,
+    type ReportParser,
+    // Removed individual parsed type imports as they are now part of ParsedReport or handled in payload construction
+} from './parser';
 
 // Define possible outcomes for processing a single message
 export enum ProcessMessageStatus {
     Success = 'SUCCESS',
     SkippedExists = 'SKIPPED_EXISTS',
     SkippedChildNotFound = 'SKIPPED_CHILD_NOT_FOUND',
-    SkippedInvalidData = 'SKIPPED_INVALID_DATA', // e.g., invalid date, no HTML
+    SkippedInvalidData = 'SKIPPED_INVALID_DATA',
+    SkippedNoParserFound = 'SKIPPED_NO_PARSER_FOUND',
+    SkippedAmbiguousChildMatch = 'SKIPPED_AMBIGUOUS_CHILD_MATCH', // New status
     Error = 'ERROR',
 }
 
 export interface ProcessMessageResult {
     status: ProcessMessageStatus;
     messageId: string;
-    error?: string; // Include error message on failure
+    error?: string;
+}
+
+// Define the structure for user provider configurations needed by the dispatcher
+export interface UserDaycareProviderConfig {
+    report_sender_email: string;
+    parser_strategy?: string | null;
+    provider_name?: string | null;
 }
 
 /**
- * Processes a single Gmail message: fetches, parses, and saves the report data to Supabase.
- *
- * @param gmail Gmail API client instance.
- * @param supabase Supabase client instance.
- * @param messageId The ID of the Gmail message to process.
- * @param userId The ID of the user owning the report.
- * @returns {Promise<ProcessMessageResult>} An object indicating the outcome.
+ * Determines the appropriate parser function based on the sender's email and user's provider configurations.
+ */
+export function getParserForProvider(
+    messageFromEmail: string,
+    userProviderConfigs: UserDaycareProviderConfig[],
+    loggerInstance: pino.Logger
+): ReportParser | null {
+    const logContext = { function: 'getParserForProvider', messageFromEmail };
+    loggerInstance.debug(logContext, "Attempting to find parser for provider.");
+
+    const lowerMessageFromEmail = messageFromEmail.toLowerCase();
+    let matchedConfig: UserDaycareProviderConfig | null = null;
+
+    for (const config of userProviderConfigs) {
+        const lowerConfigEmail = config.report_sender_email.toLowerCase();
+        let emailMatch = false;
+        if (lowerConfigEmail.startsWith('@')) {
+            if (lowerMessageFromEmail.endsWith(lowerConfigEmail)) emailMatch = true;
+        } else {
+            if (lowerMessageFromEmail === lowerConfigEmail) emailMatch = true;
+        }
+        if (emailMatch) {
+            matchedConfig = config;
+            loggerInstance.info({ ...logContext, matchedConfig }, "Found matching provider configuration by email.");
+            break;
+        }
+    }
+
+    if (matchedConfig) {
+        if (matchedConfig.parser_strategy) {
+            switch (matchedConfig.parser_strategy) {
+                case 'tadpoles_v1':
+                    loggerInstance.info({ ...logContext, strategy: matchedConfig.parser_strategy, providerName: matchedConfig.provider_name }, "Using Tadpoles v1 parser.");
+                    return parseTadpolesReport;
+                case 'goddard_tadpoles_v1':
+                    loggerInstance.info({ ...logContext, strategy: matchedConfig.parser_strategy, providerName: matchedConfig.provider_name }, "Using Goddard (via Tadpoles) v1 parser.");
+                    return parseGoddardViaTadpolesReport;
+                case 'montessori_v1':
+                    loggerInstance.info({ ...logContext, strategy: matchedConfig.parser_strategy, providerName: matchedConfig.provider_name }, "Using Montessori v1 parser.");
+                    return parseMontessoriReport;
+                default:
+                    loggerInstance.warn({ ...logContext, strategy: matchedConfig.parser_strategy, providerName: matchedConfig.provider_name }, "Unknown parser_strategy. Will attempt inference.");
+            }
+        }
+        if (lowerMessageFromEmail.includes('@tadpoles.com')) {
+            if (matchedConfig.provider_name?.toLowerCase().includes('goddard')) {
+                 loggerInstance.info({ ...logContext, providerName: matchedConfig.provider_name }, "Inferred Goddard parser (Tadpoles email, Goddard name).");
+                 return parseGoddardViaTadpolesReport;
+            }
+            loggerInstance.info({ ...logContext, providerName: matchedConfig.provider_name }, "Inferred Tadpoles parser (Tadpoles email).");
+            return parseTadpolesReport;
+        }
+        loggerInstance.warn({ ...logContext, matchedConfigEmail: matchedConfig.report_sender_email, providerName: matchedConfig.provider_name }, "Matched email, but no strategy resolved/inferred.");
+        return null;
+    }
+
+    loggerInstance.info({ ...logContext }, "No direct email match. Attempting fallback.");
+    for (const config of userProviderConfigs) {
+        const lowerProviderName = config.provider_name?.toLowerCase();
+        if (lowerProviderName?.includes('goddard') && lowerMessageFromEmail.includes('@tadpoles.com')) {
+            loggerInstance.info({ ...logContext, providerName: config.provider_name }, "Fallback: Goddard parser (Goddard name, Tadpoles email).");
+            return parseGoddardViaTadpolesReport;
+        }
+        if (lowerProviderName?.includes('tadpoles') && lowerMessageFromEmail.includes('@tadpoles.com')) {
+            loggerInstance.info({ ...logContext, providerName: config.provider_name }, "Fallback: Tadpoles parser (Tadpoles name, Tadpoles email).");
+            return parseTadpolesReport;
+        }
+    }
+
+    loggerInstance.info({ ...logContext }, "No parser found after all checks.");
+    return null;
+}
+
+
+/**
+ * Processes a single Gmail message: fetches, parses, and saves the report data to Supabase
+ * by calling a stored procedure.
  */
 export async function processGmailMessage(
     gmail: gmail_v1.Gmail,
     supabase: SupabaseClient<Database>,
     messageId: string,
-    userId: string
+    userId: string,
+    userProviderConfigs: UserDaycareProviderConfig[]
 ): Promise<ProcessMessageResult> {
-    const logContext = { gmailMessageId: messageId, userId };
+    const childLogger = logger.child({ gmailMessageId: messageId, userId });
+
+    let senderEmail: string | null = null;
+    try {
+        const messageResponseForHeaders = await gmail.users.messages.get({
+            userId: 'me', id: messageId, format: 'metadata', metadataHeaders: ['From']
+        });
+        const fromHeader = messageResponseForHeaders.data.payload?.headers?.find(h => h.name === 'From');
+        if (fromHeader?.value) {
+            const match = fromHeader.value.match(/[\w.-]+@[\w.-]+\.\w+/);
+            if (match) senderEmail = match[0].toLowerCase();
+        }
+    } catch (err: any) {
+        childLogger.error({ err: err.message }, "Failed to fetch message headers.");
+        return { status: ProcessMessageStatus.Error, messageId, error: "Failed to fetch message headers." };
+    }
+
+    if (!senderEmail) {
+        childLogger.warn("Could not extract sender email from 'From' header.");
+        return { status: ProcessMessageStatus.SkippedInvalidData, messageId, error: "Could not extract sender email." };
+    }
+    const currentLogger = childLogger.child({ senderEmail });
+
+    const parser = getParserForProvider(senderEmail, userProviderConfigs, currentLogger);
+    if (!parser) {
+        currentLogger.warn("No suitable parser found. Skipping message.");
+        return { status: ProcessMessageStatus.SkippedNoParserFound, messageId, error: `No parser found for sender: ${senderEmail}` };
+    }
 
     try {
-        // 1. Check if message already processed
+        // Check if the report already exists (based on raw_email_id)
         const { data: existingReport, error: checkError } = await supabase
             .from('daily_reports')
-            .select('id', { count: 'exact', head: true }) // More efficient check
-            .eq('gmail_message_id', messageId)
-            .maybeSingle(); // Check if it exists at all
+            .select('id', { count: 'exact', head: true })
+            .eq('raw_email_id', messageId)
+            .maybeSingle();
 
         if (checkError) {
-            logger.error({ ...logContext, err: checkError }, "Error checking for existing report");
-            throw checkError; // Propagate Supabase errors
+            currentLogger.error({ err: checkError.message }, "Error checking for existing report");
+            throw checkError; // Propagate to main catch block
         }
         if (existingReport) {
-            logger.info(logContext, "Skipping already processed message");
+            currentLogger.info("Skipping already processed message (found by raw_email_id).");
             return { status: ProcessMessageStatus.SkippedExists, messageId };
         }
 
-        // 2. Fetch full message
-        logger.debug(logContext, "Fetching full Gmail message");
+        currentLogger.debug("Fetching full Gmail message");
         const messageResponse = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
-        const messageData = messageResponse.data;
-        const payload = messageData.payload;
+        const payload = messageResponse.data.payload;
 
-        // 3. Find and decode HTML part
         let htmlContent = '';
         if (payload?.mimeType === 'text/html' && payload.body?.data) {
             htmlContent = base64UrlDecode(payload.body.data);
         } else {
             const htmlPart = findHtmlPart(payload?.parts);
-            if (htmlPart?.body?.data) {
-                htmlContent = base64UrlDecode(htmlPart.body.data);
-            }
+            if (htmlPart?.body?.data) htmlContent = base64UrlDecode(htmlPart.body.data);
         }
 
         if (!htmlContent) {
-            logger.warn(logContext, "Could not find or decode HTML body for message");
+            currentLogger.warn("No HTML content found in message.");
             return { status: ProcessMessageStatus.SkippedInvalidData, messageId, error: "No HTML content found" };
         }
 
-        // 4. Parse HTML content
-        logger.debug(logContext, "Parsing HTML content");
-        const reportData: ParsedReport = parseReportData(htmlContent);
+        currentLogger.debug("Parsing HTML content with selected parser");
+        const reportData = parser(htmlContent, currentLogger);
 
-        // 5. Find child_id based on parsed name and user_id
-        if (!reportData.childName) {
-             logger.warn(logContext, "Child name not found in parsed report. Skipping.");
-             return { status: ProcessMessageStatus.SkippedInvalidData, messageId, error: "Child name missing in report" };
+        if (!reportData) {
+            currentLogger.warn("Parser returned null. Skipping message.");
+            return { status: ProcessMessageStatus.SkippedInvalidData, messageId, error: "Failed to parse report data." };
         }
-        logger.debug({ ...logContext, parsedChildName: reportData.childName }, "Looking up child ID");
-        const { data: childData, error: childError } = await supabase
+        
+        if (!reportData.childName) {
+            currentLogger.warn("Child name missing in parsed report. Skipping.");
+            return { status: ProcessMessageStatus.SkippedInvalidData, messageId, error: "Child name missing in parsed report" };
+        }
+
+        let childId: string | null = null;
+        const parsedChildName = reportData.childName;
+        currentLogger.debug({ parsedChildName }, "Attempting to match child ID.");
+
+        // Pass 1: Exact Match on first_name
+        currentLogger.debug({ parsedChildName }, "Attempting exact match for child's first name.");
+        const { data: exactChildData, error: exactChildError } = await supabase
             .from('children')
-            .select('id')
+            .select('id, first_name, last_name') // Select names for logging
             .eq('user_id', userId)
-            .ilike('name', `%${reportData.childName}%`) // Case-insensitive partial match
+            .eq('first_name', parsedChildName) // Case-sensitive exact match on first_name
             .maybeSingle();
 
-        if (childError) {
-            logger.error({ ...logContext, err: childError }, "Error looking up child ID");
-            throw childError;
+        if (exactChildError) {
+            currentLogger.error({ err: exactChildError.message, parsedChildName }, "Error during exact child match query. Proceeding to inexact match.");
+            // Not returning, will proceed to ilike match
+        } else if (exactChildData) {
+            childId = exactChildData.id;
+            currentLogger.info({ childId, childName: `${exactChildData.first_name} ${exactChildData.last_name || ''}`.trim(), matchType: 'exact' }, "Found child by exact match on first name.");
         }
-        if (!childData) {
-            logger.warn({ ...logContext, parsedChildName: reportData.childName }, "Child not found for user. Skipping report.");
-            return { status: ProcessMessageStatus.SkippedChildNotFound, messageId, error: `Child matching '${reportData.childName}' not found` };
-        }
-        const childId = childData.id;
-        logger.debug({ ...logContext, childId }, "Found matching child ID");
 
-        // 6. Format and validate report date
+        // Pass 2: Case-Insensitive Partial Match on first_name (Fallback)
+        if (!childId) {
+            currentLogger.debug({ parsedChildName }, "Exact match not found. Attempting case-insensitive partial match for child's first name.");
+            const { data: ilikeChildrenData, error: ilikeChildError } = await supabase
+                .from('children')
+                .select('id, first_name, last_name') // Fetch names for logging
+                .eq('user_id', userId)
+                .ilike('first_name', `%${parsedChildName}%`); // Case-insensitive partial match on first_name
+
+            if (ilikeChildError) {
+                currentLogger.error({ err: ilikeChildError.message, parsedChildName }, "Error during case-insensitive partial child match query.");
+                return { status: ProcessMessageStatus.Error, messageId, error: "Database error during child lookup." };
+            }
+
+            if (!ilikeChildrenData || ilikeChildrenData.length === 0) {
+                currentLogger.warn({ parsedChildName }, "No child found by exact or case-insensitive partial match on first name. Skipping report.");
+                return { status: ProcessMessageStatus.SkippedChildNotFound, messageId, error: `No child found matching '${parsedChildName}'` };
+            }
+
+            if (ilikeChildrenData.length === 1) {
+                childId = ilikeChildrenData[0].id;
+                currentLogger.info({ childId, childName: `${ilikeChildrenData[0].first_name} ${ilikeChildrenData[0].last_name || ''}`.trim(), matchType: 'ilike-single' }, "Found single child by case-insensitive partial match on first name.");
+            } else {
+                // Multiple partial matches found
+                const ambiguousMatches = ilikeChildrenData.map(c => ({ id: c.id, name: `${c.first_name} ${c.last_name || ''}`.trim() }));
+                currentLogger.warn({ parsedChildName, matches: ambiguousMatches }, "Ambiguous child match: Multiple children found with similar first names. Skipping report.");
+                return { status: ProcessMessageStatus.SkippedAmbiguousChildMatch, messageId, error: `Ambiguous child match for '${parsedChildName}'. Found: ${ambiguousMatches.map(m => m.name).join(', ')}` };
+            }
+        }
+        
+        if (!childId) {
+             // This case should ideally not be reached if the logic above is correct, but as a safeguard:
+             currentLogger.error({ parsedChildName }, "Child ID could not be determined after matching logic. This indicates a flaw in the matching process.");
+             return { status: ProcessMessageStatus.SkippedChildNotFound, messageId, error: `Child ID determination failed for '${parsedChildName}'` };
+        }
+        currentLogger.debug({ childId, parsedChildName }, "Successfully matched child ID.");
+
         let reportDate: string | null = null;
         try {
             const parsedDate = new Date(reportData.reportDate);
-            // Check if the parsed date is valid
-            if (!isNaN(parsedDate.getTime())) {
-                reportDate = parsedDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
-            }
-        } catch (dateError) {
-             logger.warn({ ...logContext, rawDate: reportData.reportDate, err: dateError }, "Failed to parse report date string");
+            if (!isNaN(parsedDate.getTime())) reportDate = parsedDate.toISOString().split('T')[0];
+        } catch (dateError: any) {
+             currentLogger.warn({ rawDate: reportData.reportDate, err: dateError.message }, "Failed to parse report date string");
         }
 
         if (!reportDate) {
-            logger.warn({ ...logContext, rawDate: reportData.reportDate }, "Invalid or unparseable report date. Skipping report.");
+            currentLogger.warn({ rawDate: reportData.reportDate }, "Invalid report date. Skipping report.");
             return { status: ProcessMessageStatus.SkippedInvalidData, messageId, error: `Invalid report date: ${reportData.reportDate}` };
         }
-        logger.debug({ ...logContext, reportDate }, "Formatted report date");
+        currentLogger.debug({ reportDate }, "Formatted report date");
 
-        // 7. Upsert Daily Report
-        logger.debug({ ...logContext, childId, reportDate }, "Upserting daily report");
-        const { data: upsertedReport, error: reportError } = await supabase
-            .from('daily_reports')
-            .upsert({
-                child_id: childId,
-                date: reportDate,
-                teacher_notes: reportData.teacherNotes,
-                gmail_message_id: messageId,
-                child_name_from_report: reportData.childName, // Store raw parsed name
-                report_date_from_report: reportData.reportDate, // Store raw parsed date
-            }, { onConflict: 'gmail_message_id', ignoreDuplicates: false })
-            .select('id')
-            .single(); // Expect one row back
-
-        if (reportError) {
-             logger.error({ ...logContext, err: reportError }, "Error upserting daily report");
-             throw reportError;
-        }
-        if (!upsertedReport) {
-             // This case might happen if ignoreDuplicates was true and it existed, but we set it to false.
-             // If it still happens, it's an unexpected state.
-             logger.error(logContext, "Upsert operation did not return the report ID.");
-             throw new Error('Failed to upsert daily report or retrieve its ID.');
-        }
-        const reportId = upsertedReport.id;
-        logger.info({ ...logContext, reportId }, "Successfully upserted daily report");
-
-        // 8. Insert related data (wrap each in try/catch to allow partial success)
-        const insertPromises = [];
-
-        if (reportData.naps.length > 0) {
-            const napInserts = reportData.naps.map(nap => ({
-                report_id: reportId,
+        // Prepare the JSONB payload for the SQL function
+        const reportPayload = {
+            child_id: childId,
+            report_date: reportDate,
+            teacher_notes: reportData.teacherNotes,
+            raw_email_id: messageId,
+            parent_notes: null, // Current parsers don't extract this
+            
+            naps_data: reportData.naps?.map(nap => ({
                 start_time: formatTime(nap.startTime),
                 end_time: formatTime(nap.endTime),
                 duration_text: nap.durationText,
-            }));
-            insertPromises.push(
-                supabase.from('naps').insert(napInserts)
-                    .then(({ error }) => {
-                        if (error) logger.error({ ...logContext, reportId, err: error }, "Error inserting naps");
-                        else logger.debug({ ...logContext, reportId, count: napInserts.length }, "Inserted naps");
-                    })
-            );
-        }
-        // ... (Similar blocks for meals, bathroomEvents, activities, photos) ...
-         if (reportData.meals.length > 0) {
-            const mealInserts = reportData.meals.map(meal => ({
-                report_id: reportId,
-                meal_time: formatTime(meal.time),
-                food_description: meal.food,
-                details: meal.details,
-                initials: meal.initials,
-            }));
-            insertPromises.push(
-                supabase.from('meals').insert(mealInserts)
-                    .then(({ error }) => {
-                        if (error) logger.error({ ...logContext, reportId, err: error }, "Error inserting meals");
-                         else logger.debug({ ...logContext, reportId, count: mealInserts.length }, "Inserted meals");
-                    })
-            );
-        }
-
-        if (reportData.bathroomEvents.length > 0) {
-            const bathroomInserts = reportData.bathroomEvents.map(event => ({
-                report_id: reportId,
-                event_time: formatTime(event.time),
+            })) || [],
+            
+            meals_data: reportData.meals?.map(meal => ({
+                meal_time: meal.time ? `${reportDate} ${formatTime(meal.time)}` : null,
+                description: `${meal.food}${meal.details ? ` (${meal.details})` : ''}${meal.initials ? ` [${meal.initials.join(', ')}]` : ''}`.trim(),
+                amount: null, // Parser doesn't provide specific amount
+            })) || [],
+            
+            bathroom_events_data: reportData.bathroomEvents?.map(event => ({
+                event_time: event.time ? `${reportDate} ${formatTime(event.time)}` : null,
                 event_type: event.type,
                 status: event.status,
-                initials: event.initials,
-            }));
-            insertPromises.push(
-                supabase.from('bathroom_events').insert(bathroomInserts)
-                    .then(({ error }) => {
-                        if (error) logger.error({ ...logContext, reportId, err: error }, "Error inserting bathroom events");
-                         else logger.debug({ ...logContext, reportId, count: bathroomInserts.length }, "Inserted bathroom events");
-                    })
-            );
-        }
-
-        if (reportData.activities.length > 0) {
-            const activityInserts = reportData.activities.map(activity => ({
-                report_id: reportId,
+                initials: event.initials || [], // Ensure it's an array for JSONB
+            })) || [],
+            
+            activities_data: reportData.activities?.map(activity => ({
+                activity_time: null, // Parser doesn't provide specific time
                 description: activity.description,
-            }));
-            insertPromises.push(
-                supabase.from('activities').insert(activityInserts)
-                    .then(({ error }) => {
-                        if (error) logger.error({ ...logContext, reportId, err: error }, "Error inserting activities");
-                         else logger.debug({ ...logContext, reportId, count: activityInserts.length }, "Inserted activities");
-                    })
-            );
+                categories: null, // Parser doesn't provide this structured
+                goals: null,      // Parser doesn't provide this structured
+            })) || [],
+            
+            photos_data: reportData.photos?.map(photo => {
+                let sourceDomain = null;
+                try {
+                    if (photo.src) sourceDomain = new URL(photo.src).hostname;
+                } catch (e) { /* ignore invalid URL */ }
+                return {
+                    image_url: photo.src,
+                    thumbnail_url: null, // Parser doesn't provide specific thumbnail
+                    source_domain: sourceDomain,
+                    description: photo.description,
+                };
+            }) || [],
+        };
+
+        currentLogger.info({ reportPayloadSize: JSON.stringify(reportPayload).length }, "Calling process_parsed_email_report RPC");
+        const { data: rpcData, error: rpcError } = await supabase.rpc(
+            'process_parsed_email_report',
+            { p_report_data: reportPayload }
+        );
+
+        if (rpcError) {
+            currentLogger.error({ err: rpcError, details: rpcError.details, hint: rpcError.hint }, "Error calling process_parsed_email_report RPC");
+            return { status: ProcessMessageStatus.Error, messageId, error: `RPC Error: ${rpcError.message}` };
         }
 
-         if (reportData.photos.length > 0) {
-            const photoInserts = reportData.photos.map(photo => ({
-                report_id: reportId,
-                image_url: photo.src, // Assuming src is the URL
-                description: photo.description,
-                date: reportDate, // Add date context to photo record
-                child_id: childId, // Add child_id context
-            }));
-             insertPromises.push(
-                supabase.from('photos').insert(photoInserts)
-                    .then(({ error }) => {
-                        if (error) logger.error({ ...logContext, reportId, err: error }, "Error inserting photos");
-                         else logger.debug({ ...logContext, reportId, count: photoInserts.length }, "Inserted photos");
-                    })
-            );
-        }
-
-
-        // Wait for all related data inserts to attempt completion
-        await Promise.allSettled(insertPromises);
-
+        currentLogger.info({ newReportId: rpcData }, "Successfully processed report via RPC.");
         return { status: ProcessMessageStatus.Success, messageId };
 
     } catch (error: any) {
-        logger.error({ ...logContext, err: error }, `Unhandled error processing message`);
+        currentLogger.error({ err: error.message || String(error) }, `Unhandled error in processGmailMessage`);
         return { status: ProcessMessageStatus.Error, messageId, error: error.message || 'Unknown processing error' };
     }
 }
