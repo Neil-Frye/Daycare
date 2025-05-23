@@ -1,8 +1,8 @@
 import pino from 'pino';
 import {
     parseGoddardViaTadpolesReport,
-    type ParsedReport,
-    type ReportParser, // Though not strictly needed for this test, good for consistency
+    ParsedReport, // Removed 'type'
+    ReportParser, // Removed 'type' // Though not strictly needed for this test, good for consistency
     parseTadpolesReport, // Keep if there are tests for it, or for future use
     parseMontessoriReport // Keep for future use
 } from './parser';

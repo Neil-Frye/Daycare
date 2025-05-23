@@ -3,20 +3,46 @@ import { gmail_v1 } from 'googleapis';
 import pino from 'pino';
 import { processGmailMessage, ProcessMessageStatus, UserDaycareProviderConfig } from './processor';
 import *   as ParserModule from './parser'; // To mock individual parsers
-import mainLogger from '@/lib/logger'; // Actual logger to mock its methods
+// import mainLogger from '@/lib/logger'; // REMOVED as per current task instruction
 
 // Mock the Supabase client
 const mockSupabaseRpc = jest.fn();
-const mockSupabaseFrom = jest.fn().mockReturnValue({
-    select: jest.fn().mockReturnValue({
-        eq: jest.fn().mockReturnValue({
-            maybeSingle: jest.fn(),
-        }),
-    }),
-});
+
+// --- New Granular Mocks for Supabase Client Query Builder ---
+
+// For 'children' table queries:
+const mockChildMaybeSingleExact = jest.fn().mockName('mockChildMaybeSingleExact'); // Final .maybeSingle() for exact child match
+const mockChildIlikePartial = jest.fn().mockName('mockChildIlikePartial');       // Final .ilike() for partial child match (returns Promise)
+
+// Represents the object returned by .eq('first_name', ...) which then allows .maybeSingle()
+const mockEqFirstNameReturnsMaybeSingle = jest.fn()
+    .mockName('mockEqFirstNameReturnsMaybeSingle');
+
+// Represents the object returned by .eq('user_id', ...) which then allows .eq('first_name', ...) or .ilike('first_name', ...)
+const mockEqUserIdReturnsEqAndIlike = jest.fn()
+    .mockName('mockEqUserIdReturnsEqAndIlike');
+
+// Represents the object returned by .select(...) for 'children' table, which then allows .eq('user_id', ...)
+const mockChildrenSelectReturnsEq = jest.fn()
+    .mockName('mockChildrenSelectReturnsEq');
+
+// For 'daily_reports' table queries:
+const mockReportMaybeSingle = jest.fn().mockName('mockReportMaybeSingle'); // Final .maybeSingle() for report lookup
+
+// Represents the object returned by .eq(...) for 'daily_reports', which then allows .maybeSingle()
+const mockReportEqReturnsMaybeSingle = jest.fn()
+    .mockName('mockReportEqReturnsMaybeSingle');
+
+// Represents the object returned by .select(...) for 'daily_reports', which then allows .eq(...)
+const mockReportSelectReturnsEq = jest.fn()
+    .mockName('mockReportSelectReturnsEq');
+
+// The main supabase.from(...) mock
+const mockFrom = jest.fn().mockName('mockFrom');
+
 const supabase = {
     rpc: mockSupabaseRpc,
-    from: mockSupabaseFrom, // For existing report check
+    from: mockFrom, // Use the new top-level mockFrom
 } as unknown as SupabaseClient;
 
 // Mock the Gmail API client
@@ -30,13 +56,12 @@ const gmail = {
 } as unknown as gmail_v1.Gmail;
 
 // Mock the logger
-// We need to mock the main logger and its child method
 const mockLoggerInstance = {
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
     debug: jest.fn(),
-    child: jest.fn().mockReturnThis(), // child() returns the same mock for chained calls
+    child: jest.fn(), // Initialize child here, will be configured in beforeEach
 };
 jest.mock('@/lib/logger', () => ({
     __esModule: true,
@@ -71,12 +96,30 @@ describe('processGmailMessage - RPC Handling', () => {
         // Clear mock call history and implementations before each test
         mockSupabaseRpc.mockReset();
         mockGmailMessagesGet.mockReset();
-        (mockSupabaseFrom().select().eq().maybeSingle as jest.Mock).mockReset();
+        
+        // Reset new granular mocks
+        mockFrom.mockReset(); // Use mockReset to also clear mockImplementation if set directly
+        
+        mockChildrenSelectReturnsEq.mockReset();
+        mockEqUserIdReturnsEqAndIlike.mockReset();
+        mockEqFirstNameReturnsMaybeSingle.mockReset();
+        mockChildMaybeSingleExact.mockReset();
+        mockChildIlikePartial.mockReset();
+        
+        mockReportSelectReturnsEq.mockReset();
+        mockReportEqReturnsMaybeSingle.mockReset();
+        mockReportMaybeSingle.mockReset();
+
+        // Reset logger mocks
         mockLoggerInstance.info.mockClear();
         mockLoggerInstance.warn.mockClear();
         mockLoggerInstance.error.mockClear();
         mockLoggerInstance.debug.mockClear();
-        mockLoggerInstance.child.mockClear();
+        mockLoggerInstance.child.mockClear(); // Clear any previous settings or calls
+
+        // Crucially, ensure 'child' is set to return 'this' (the mock instance) for each test
+        mockLoggerInstance.child.mockReturnThis(); 
+        
         mockParseTadpolesReport.mockReset();
 
         // Default mock implementations
@@ -94,23 +137,79 @@ describe('processGmailMessage - RPC Handling', () => {
                 },
             },
         });
-        (mockSupabaseFrom().select().eq().maybeSingle as jest.Mock).mockResolvedValue({ data: null, error: null }); // Default: no existing report
+        
+        // Default: no existing report
+        mockReportMaybeSingle.mockResolvedValue({ data: null, error: null }); 
+        
         mockParseTadpolesReport.mockReturnValue(sampleParsedReport); // Default: parser returns sample data
         
-        // Mock the children table lookup
-        (supabase.from('children').select().eq().ilike as jest.Mock) = jest.fn().mockReturnValue({
-             maybeSingle: jest.fn().mockResolvedValue({ data: { id: sampleChildId }, error: null })
-        });
-         // Mock the exact children table lookup
-        (supabase.from('children').select().eq().eq as jest.Mock) = jest.fn().mockReturnValue({
-            maybeSingle: jest.fn().mockResolvedValue({ data: { id: sampleChildId }, error: null })
-        });
+        // Default behavior for mocks. Tests can override these using mockResolvedValueOnce if needed.
+        mockChildMaybeSingleExact.mockResolvedValue({ data: { id: sampleChildId }, error: null }); // Default: Exact child found
+        mockChildIlikePartial.mockResolvedValue({ data: [{ id: sampleChildId }], error: null });   // Default: Partial child found (if exact fails)
+        mockReportMaybeSingle.mockResolvedValue({ data: null, error: null });                     // Default: No existing report
 
+        // --- Configure mockFrom Implementation ---
+        mockFrom.mockImplementation((tableName: string) => {
+            if (tableName === 'children') {
+                // .select(...) returns an object with .eq()
+                mockChildrenSelectReturnsEq.mockImplementation((selectArgs) => {
+                    if (selectArgs !== 'id, user_id, first_name') { // Basic check
+                        console.warn(`mockChildrenSelectReturnsEq: Unexpected select args: ${selectArgs}`);
+                    }
+                    return { eq: mockEqUserIdReturnsEqAndIlike };
+                });
 
+                // .eq('user_id', ...) returns an object with .eq() and .ilike()
+                mockEqUserIdReturnsEqAndIlike.mockImplementation((column, value) => {
+                    if (column === 'user_id') {
+                        return { 
+                            eq: mockEqFirstNameReturnsMaybeSingle, // For .eq('first_name', ...)
+                            ilike: mockChildIlikePartial          // For .ilike('first_name', ...)
+                        };
+                    }
+                    // Fallback for unexpected column in the first .eq() call
+                    return { 
+                        eq: jest.fn().mockReturnValue({ maybeSingle: jest.fn().mockResolvedValue({ data: null, error: new Error(`mockEqUserIdReturnsEqAndIlike: Unexpected column '${column}'`) }) }),
+                        ilike: jest.fn().mockResolvedValue({ data: [], error: new Error(`mockEqUserIdReturnsEqAndIlike: Unexpected column '${column}' for ilike`) })
+                    };
+                });
+
+                // .eq('first_name', ...) returns an object with .maybeSingle()
+                mockEqFirstNameReturnsMaybeSingle.mockImplementation((column, value) => {
+                    if (column === 'first_name') {
+                        return { maybeSingle: mockChildMaybeSingleExact };
+                    }
+                    // Fallback for unexpected column in the second .eq() call
+                    return { 
+                        maybeSingle: jest.fn().mockResolvedValue({ data: null, error: new Error(`mockEqFirstNameReturnsMaybeSingle: Unexpected column '${column}'`) })
+                    };
+                });
+                
+                return { select: mockChildrenSelectReturnsEq };
+            }
+            
+            if (tableName === 'daily_reports') {
+                mockReportSelectReturnsEq.mockImplementation((selectArgs) => {
+                     return { eq: mockReportEqReturnsMaybeSingle };
+                });
+                mockReportEqReturnsMaybeSingle.mockImplementation((column, value) => {
+                    // Can add column check if specific (e.g. raw_email_id, child_id, report_date)
+                    return { maybeSingle: mockReportMaybeSingle };
+                });
+                return { select: mockReportSelectReturnsEq };
+            }
+
+            // Fallback for any other table name
+            console.error(`mockFrom: UNEXPECTED TABLE NAME: ${tableName}`);
+            const fallbackMaybeSingle = jest.fn().mockResolvedValue({ data: null, error: new Error(`mockFrom: Default fallback for unknown table '${tableName}'`) });
+            const fallbackEq = jest.fn().mockReturnValue({ maybeSingle: fallbackMaybeSingle });
+            const fallbackSelect = jest.fn().mockReturnValue({ eq: fallbackEq });
+            return { select: fallbackSelect };
+        });
     });
 
     test('should call supabase.rpc with correctly structured payload on successful parsing', async () => {
-        const rpcResponseData = { /* Supabase RPC doesn't usually return data for insert functions unless specified, often it's null or a status */ }; 
+        const rpcResponseData = { id: 'new-report-uuid' }; 
         mockSupabaseRpc.mockResolvedValue({ data: rpcResponseData, error: null });
 
         const result = await processGmailMessage(
@@ -184,7 +283,7 @@ describe('processGmailMessage - RPC Handling', () => {
     });
     
     test('should correctly format meal_time and event_time with reportDate', async () => {
-        mockSupabaseRpc.mockResolvedValue({ data: {}, error: null }); // Success
+        mockSupabaseRpc.mockResolvedValue({ data: { id: 'report-id-timeformat' }, error: null }); // Success
         const specificReportData: ParserModule.ParsedReport = {
             ...sampleParsedReport,
             reportDate: '2024-01-15', // Specific date for this test
@@ -219,18 +318,13 @@ describe('processGmailMessage - RPC Handling', () => {
     
     // Test for child lookup failure (SkippedChildNotFound)
     test('should return SkippedChildNotFound if child lookup fails', async () => {
-        // Override the default mock for child lookup to simulate child not found
-        (supabase.from('children').select().eq().eq as jest.Mock).mockReturnValue({
-            maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }) // No exact match
-        });
-        (supabase.from('children').select().eq().ilike as jest.Mock).mockReturnValue({
-             // .ilike() returns an array, so simulate empty array for no partial match
-            mockResolvedValue({ data: [], error: null }) 
-        });
-         // Re-mock the specific part of the chain for ilike if it's more complex
-        const mockIlikeQuery = jest.fn().mockResolvedValue({ data: [], error: null });
-        (supabase.from('children').select().eq().ilike as jest.Mock) = jest.fn(() => mockIlikeQuery());
-
+        // Override the default mock behavior for this specific test case
+        
+        // Pass 1: Exact match fails
+        mockChildMaybeSingleExact.mockResolvedValueOnce({ data: null, error: null });
+        
+        // Pass 2: Partial match also fails (ilike returns a promise with an array of results)
+        mockChildIlikePartial.mockResolvedValueOnce({ data: [], error: null });
 
         const result = await processGmailMessage(
             gmail,
@@ -241,8 +335,28 @@ describe('processGmailMessage - RPC Handling', () => {
         );
 
         expect(result.status).toBe(ProcessMessageStatus.SkippedChildNotFound);
-        expect(result.error).toContain(`No child found matching`);
+        expect(result.error).toContain(`No child found matching name '${sampleParsedReport.childName}' for user 'test-user-id' after exact and partial checks.`);
         expect(mockSupabaseRpc).not.toHaveBeenCalled();
+        
+        // Verify the calls to child lookup mocks
+        expect(mockFrom).toHaveBeenCalledWith('children'); 
+        // from('children') is called for both exact and partial attempts due to how the code is structured
+        expect(mockFrom).toHaveBeenCalledTimes(2); 
+        
+        expect(mockChildrenSelectReturnsEq).toHaveBeenCalledWith('id, user_id, first_name'); 
+        expect(mockChildrenSelectReturnsEq).toHaveBeenCalledTimes(2); 
+        
+        expect(mockEqUserIdReturnsEqAndIlike).toHaveBeenCalledWith('user_id', 'test-user-id');
+        expect(mockEqUserIdReturnsEqAndIlike).toHaveBeenCalledTimes(2); 
+        
+        // Exact match attempt: .from('children').select(...).eq('user_id',...).eq('first_name',...).maybeSingle()
+        expect(mockEqFirstNameReturnsMaybeSingle).toHaveBeenCalledWith('first_name', sampleParsedReport.childName);
+        expect(mockEqFirstNameReturnsMaybeSingle).toHaveBeenCalledTimes(1); 
+        expect(mockChildMaybeSingleExact).toHaveBeenCalledTimes(1);
+        
+        // Partial match attempt: .from('children').select(...).eq('user_id',...).ilike('first_name',...)
+        expect(mockChildIlikePartial).toHaveBeenCalledWith('first_name', `%${sampleParsedReport.childName}%`);
+        expect(mockChildIlikePartial).toHaveBeenCalledTimes(1); 
     });
 
 

@@ -2,7 +2,7 @@ import { google, gmail_v1 } from 'googleapis';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Database } from '@/lib/supabase/types'; // Adjust path as needed
 import pino from 'pino';
-import logger from '@/lib/logger'; // Main logger
+import originalLogger from '@/lib/logger'; // Renamed Main logger
 import {
     base64UrlDecode,
     findHtmlPart,
@@ -123,9 +123,10 @@ export async function processGmailMessage(
     supabase: SupabaseClient<Database>,
     messageId: string,
     userId: string,
-    userProviderConfigs: UserDaycareProviderConfig[]
+    userProviderConfigs: UserDaycareProviderConfig[],
+    logger: pino.Logger = originalLogger // New logger parameter with default value
 ): Promise<ProcessMessageResult> {
-    const childLogger = logger.child({ gmailMessageId: messageId, userId });
+    const childLogger = logger.child({ gmailMessageId: messageId, userId }); // This now uses the logger parameter
 
     let senderEmail: string | null = null;
     try {
