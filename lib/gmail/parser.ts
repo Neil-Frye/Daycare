@@ -271,9 +271,16 @@ export const parseGoddardViaTadpolesReport: ReportParser = (htmlContent: string,
 
     const nameElement = contentArea.find('h1[style*="font-size:50px"]');
     if (nameElement.length) {
-        report.childName = nameElement.text().replace(/&nbsp;/g, '').trim();
+        const fullName = nameElement.text().replace(/&nbsp;/g, '').trim();
+        if (fullName) {
+            report.childName = fullName.split(' ')[0]; // Take the first word as the first name
+            logger.info({ parser: "parseGoddardViaTadpolesReport", fullExtractedName: fullName, derivedFirstName: report.childName }, "Extracted and processed child name.");
+        } else {
+            logger.warn("parseGoddardViaTadpolesReport: Child name <h1> found but was empty after trimming.");
+        }
     } else {
-        logger.warn("parseGoddardViaTadpolesReport: Child name <h1> not found.");
+        logger.warn("parseGoddardViaTadpolesReport: Child name <h1> with style 'font-size:50px' not found.");
+        logger.warn("parseGoddardViaTadpolesReport: Child name <h1> with style 'font-size:50px' not found.");
     }
     
     const dateHeaderElement = contentArea.find('h3:contains("DAILY REPORT -")');
@@ -285,11 +292,18 @@ export const parseGoddardViaTadpolesReport: ReportParser = (htmlContent: string,
         logger.warn("parseGoddardViaTadpolesReport: 'DAILY REPORT - <Date>' header <h3> not found.");
     }
 
-    if (!report.childName || !report.reportDate) {
-        logger.error("parseGoddardViaTadpolesReport: Critical information (childName or reportDate) could not be parsed. Aborting.");
+    // Child name is now potentially just the first name.
+    // Report date is still critical. Child name being missing is handled by the check for nameElement.length and fullName.
+    // If report.childName is empty at this point, it means extraction failed or the h1 was empty.
+    if (!report.reportDate) {
+        logger.error("parseGoddardViaTadpolesReport: Critical information (reportDate) could not be parsed. Aborting as report is unusable.");
         return null;
     }
-    logger.info({ childName: report.childName, reportDate: report.reportDate }, "parseGoddardViaTadpolesReport: Child Name and Report Date extracted.");
+    if (!report.childName) {
+         logger.warn("parseGoddardViaTadpolesReport: Child name could not be extracted. Report might be processed but will likely fail matching.");
+    }
+    // Log extracted info, even if childName is missing, for debugging.
+    logger.info({ childName: report.childName, reportDate: report.reportDate }, "parseGoddardViaTadpolesReport: Child Name (potentially first name) and Report Date extraction attempt completed.");
 
     const notesHeading = contentArea.find('h3:contains("TODAY\'S TEACHER NOTES")').first();
     if (notesHeading.length) {

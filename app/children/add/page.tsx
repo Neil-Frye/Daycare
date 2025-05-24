@@ -20,7 +20,8 @@ export default function AddChildPage() {
   const { toast } = useToast()
   const supabase = createClientComponentClient()
   const [formData, setFormData] = useState({
-    name: "",
+    firstName: "",
+    lastName: "",
     birthDate: "",
     gender: ""
   })
@@ -58,7 +59,7 @@ export default function AddChildPage() {
 
       toast({
         title: "Child added successfully",
-        description: `${formData.name} has been added to your account.`,
+        description: `${formData.firstName} ${formData.lastName} has been added to your account.`,
       })
       router.push('/')
     } catch (error) {
@@ -85,13 +86,25 @@ export default function AddChildPage() {
       <h1 className="text-2xl font-bold mb-8">Add a Child</h1>
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="space-y-2">
-          <Label htmlFor="child-name">Full Name</Label>
+          <Label htmlFor="child-firstName">First Name</Label>
           <Input
-            id="child-name"
-            name="name"
-            value={formData.name}
+            id="child-firstName"
+            name="firstName"
+            value={formData.firstName}
             onChange={handleChange}
-            autoComplete="name"
+            autoComplete="given-name"
+            required
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="child-lastName">Last Name</Label>
+          <Input
+            id="child-lastName"
+            name="lastName"
+            value={formData.lastName}
+            onChange={handleChange}
+            autoComplete="family-name"
             required
           />
         </div>
@@ -120,9 +133,11 @@ export default function AddChildPage() {
               <SelectValue placeholder="Select gender" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="male">Male</SelectItem>
-              <SelectItem value="female">Female</SelectItem>
-              <SelectItem value="other">Other</SelectItem>
+              <SelectItem value="Male">Male</SelectItem>
+              <SelectItem value="Female">Female</SelectItem>
+              <SelectItem value="Non-binary">Non-binary</SelectItem>
+              <SelectItem value="Other">Other</SelectItem>
+              <SelectItem value="Prefer not to say">Prefer not to say</SelectItem>
             </SelectContent>
           </Select>
         </div>

@@ -39,6 +39,7 @@ const postChildHandler = async (request: NextRequest, session: Session) => {
     .from('children')
     .insert([
       {
+        name: `${firstName} ${lastName}`.trim(),
         first_name: firstName,
         last_name: lastName,
         birth_date: birthDate, // Already transformed to YYYY-MM-DD by Zod
