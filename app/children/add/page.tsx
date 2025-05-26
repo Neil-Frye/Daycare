@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import logger from '@/lib/logger'
@@ -24,7 +25,8 @@ export default function AddChildPage() {
     firstName: "",
     lastName: "",
     birthDate: "",
-    gender: ""
+    gender: "",
+    notes: ""
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -72,7 +74,7 @@ export default function AddChildPage() {
     }
   }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value
@@ -138,6 +140,19 @@ export default function AddChildPage() {
               <SelectItem value="Prefer not to say">Prefer not to say</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="child-notes">Notes (Optional)</Label>
+          <Textarea
+            id="child-notes"
+            name="notes"
+            value={formData.notes}
+            onChange={handleChange}
+            placeholder="Any additional notes about your child..."
+            rows={3}
+            maxLength={500}
+          />
         </div>
 
         <Button type="submit" disabled={isSubmitting}>
