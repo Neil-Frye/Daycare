@@ -17,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
+import logger from '@/lib/logger';
 // TODO: Add Date/Time Picker component if not already available
 // import { DateTimePicker } from '@/components/ui/datetime-picker';
 
@@ -59,7 +60,6 @@ export default function SleepForm({ childId }: SleepFormProps) { // Use the prop
         return;
     }
     setIsLoading(true);
-    console.log('Submitting Sleep Data:', { ...data, childId });
 
     // Using 'nap' type for API call as the backend currently handles both nap/sleep under 'nap'
     // If distinct handling is needed later, update API and type here.
@@ -90,7 +90,7 @@ export default function SleepForm({ childId }: SleepFormProps) { // Use the prop
       });
       form.reset(); // Reset form after successful submission
     } catch (error) {
-      console.error('Error logging sleep:', error);
+      logger.error({ err: error }, 'Error logging sleep');
       toast({
         title: 'Error Logging Sleep',
         description: error instanceof Error ? error.message : 'Could not save sleep details. Please try again.',

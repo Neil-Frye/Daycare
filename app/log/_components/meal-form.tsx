@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
+import logger from '@/lib/logger';
 // TODO: Add Date/Time Picker component if not already available
 // import { DateTimePicker } from '@/components/ui/datetime-picker';
 
@@ -67,7 +68,6 @@ export default function MealForm({ childId }: MealFormProps) { // Use the prop
         return;
     }
     setIsLoading(true);
-    console.log('Submitting Meal/Bottle Data:', { ...data, childId });
 
     try {
       const response = await fetch('/api/log', {
@@ -98,7 +98,7 @@ export default function MealForm({ childId }: MealFormProps) { // Use the prop
       });
       form.reset(); // Reset form after successful submission
     } catch (error) {
-      console.error('Error logging meal/bottle:', error);
+      logger.error({ err: error }, 'Error logging meal/bottle');
       toast({
         title: 'Error Logging Meal/Bottle',
         description: error instanceof Error ? error.message : 'Could not save feeding details. Please try again.',
