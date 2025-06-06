@@ -24,8 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
-// TODO: Add Date/Time Picker component if not already available
-// import { DateTimePicker } from '@/components/ui/datetime-picker';
+import { DateTimePicker } from '@/components/ui/datetime-picker';
 
 // Define the schema for validation
 const mealFormSchema = z.object({
@@ -112,7 +111,6 @@ export default function MealForm({ childId }: MealFormProps) { // Use the prop
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-        {/* TODO: Replace Input with DateTimePicker when available */}
         <FormField
           control={form.control}
           name="time"
@@ -120,21 +118,11 @@ export default function MealForm({ childId }: MealFormProps) { // Use the prop
             <FormItem>
               <FormLabel>Time</FormLabel>
               <FormControl>
-                {/* Using Input type="datetime-local" as a temporary measure */}
-                <Input
-                  type="datetime-local"
-                  onChange={(e) => {
-                    const dateValue = e.target.value ? new Date(e.target.value) : null;
-                    if (dateValue && !isNaN(dateValue.getTime())) {
-                      field.onChange(dateValue);
-                    } else {
-                      field.onChange(null);
-                    }
-                  }}
-                  // value={field.value ? field.value.toISOString().slice(0, 16) : ''}
+                <DateTimePicker
+                  date={field.value}
+                  setDate={field.onChange}
                   disabled={isLoading}
                 />
-                {/* <DateTimePicker date={field.value} setDate={field.onChange} disabled={isLoading} /> */}
               </FormControl>
               <FormDescription>When the meal/bottle occurred.</FormDescription>
               <FormMessage />
