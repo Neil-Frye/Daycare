@@ -2,8 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase/server'; // Use server client
 import { verifyChildOwnership } from '@/lib/supabase/utils';
 import { aggregateActivityData } from '@/lib/analytics/activityUtils'; // Import the aggregation utility
+import { Database } from '@/lib/supabase/types';
 import { Session } from 'next-auth';
 import { withApiHandler } from '@/lib/api/handler'; // Import the wrapper
+
+type DailyReportWithActivities = Database['public']['Tables']['daily_reports']['Row'] & {
+  activities: Pick<Database['public']['Tables']['activities']['Row'], 'description'>[] | null;
+};
 
 // Define the core logic for the GET handler
 const getActivityAnalyticsHandler = async (request: NextRequest, session: Session) => {
@@ -40,9 +45,9 @@ const getActivityAnalyticsHandler = async (request: NextRequest, session: Sessio
     throw reportError; // Throw error to be handled by the wrapper
   }
 
-  // Aggregate data using the utility function
-  // Use 'as any' for now, refine with proper Supabase types if needed
-  const aggregatedData = aggregateActivityData(reportData as any);
+  // Aggregate data using the utility function with typed data
+  const typedData: DailyReportWithActivities[] = reportData ?? [];
+  const aggregatedData = aggregateActivityData(typedData);
 
   return NextResponse.json(aggregatedData);
 };
