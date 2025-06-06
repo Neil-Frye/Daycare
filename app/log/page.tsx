@@ -9,6 +9,7 @@ import MealForm from './_components/meal-form';
 import SleepForm from './_components/sleep-form';
 import BathroomForm from './_components/bathroom-form';
 import ActivityForm from './_components/activity-form';
+import Link from 'next/link';
 import supabaseClient from '@/lib/supabase/client'; // Use default import, renamed for clarity
 import { type Database, type Tables } from '@/lib/supabase/types'; // Import Tables utility type
 
@@ -57,7 +58,13 @@ export default function ManualLogPage() {
       {isLoadingChildren ? (
         <p>Loading children...</p>
       ) : children.length === 0 ? (
-        <p>No children found. Please add a child first.</p> // TODO: Link to add child page
+        <p>
+          No children found. Please{' '}
+          <Link href="/children/add" className="text-blue-500 underline">
+            add a child
+          </Link>{' '}
+          first.
+        </p>
       ) : (
         <Card>
           <CardHeader>
