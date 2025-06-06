@@ -128,6 +128,7 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }: { session: Session; token: JWT }): Promise<Session> {
       session.accessToken = token.accessToken;
+      session.refreshToken = token.refreshToken as string | undefined;
       session.error = token.error as string | undefined; // Ensure type compatibility
       // Add user ID from token to session
       if (token.sub && session.user) {
