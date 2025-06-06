@@ -14,11 +14,9 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
-// TODO: Add Date/Time Picker component if not already available
-// import { DateTimePicker } from '@/components/ui/datetime-picker';
+import { DateTimePicker } from '@/components/ui/datetime-picker';
 
 // Define the schema for validation
 const napFormSchema = z.object({
@@ -101,7 +99,6 @@ export default function NapForm({ childId }: NapFormProps) { // Use the prop
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-        {/* TODO: Replace Input with DateTimePicker when available */}
         <FormField
           control={form.control}
           name="startTime"
@@ -109,23 +106,11 @@ export default function NapForm({ childId }: NapFormProps) { // Use the prop
             <FormItem>
               <FormLabel>Start Time</FormLabel>
               <FormControl>
-                {/* Using Input type="datetime-local" as a temporary measure */}
-                {/* Need to handle value conversion carefully if using datetime-local */}
-                <Input
-                  type="datetime-local"
-                  onChange={(e) => {
-                    // Ensure a valid date is created before calling field.onChange
-                    const dateValue = e.target.value ? new Date(e.target.value) : null;
-                    if (dateValue && !isNaN(dateValue.getTime())) {
-                      field.onChange(dateValue);
-                    } else {
-                      field.onChange(null); // Or handle invalid input appropriately
-                    }
-                  }}
-                  // value={field.value ? field.value.toISOString().slice(0, 16) : ''} // Formatting for datetime-local
+                <DateTimePicker
+                  date={field.value}
+                  setDate={field.onChange}
                   disabled={isLoading}
                 />
-                {/* <DateTimePicker date={field.value} setDate={field.onChange} disabled={isLoading} /> */}
               </FormControl>
               <FormDescription>When the nap started.</FormDescription>
               <FormMessage />
@@ -139,21 +124,11 @@ export default function NapForm({ childId }: NapFormProps) { // Use the prop
             <FormItem>
               <FormLabel>End Time</FormLabel>
               <FormControl>
-                 {/* Using Input type="datetime-local" as a temporary measure */}
-                 <Input
-                  type="datetime-local"
-                  onChange={(e) => {
-                    const dateValue = e.target.value ? new Date(e.target.value) : null;
-                    if (dateValue && !isNaN(dateValue.getTime())) {
-                      field.onChange(dateValue);
-                    } else {
-                      field.onChange(null);
-                    }
-                  }}
-                  // value={field.value ? field.value.toISOString().slice(0, 16) : ''} // Formatting for datetime-local
+                <DateTimePicker
+                  date={field.value}
+                  setDate={field.onChange}
                   disabled={isLoading}
                 />
-                {/* <DateTimePicker date={field.value} setDate={field.onChange} disabled={isLoading} /> */}
               </FormControl>
               <FormDescription>When the nap ended.</FormDescription>
               <FormMessage />
