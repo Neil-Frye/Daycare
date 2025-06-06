@@ -2,8 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase/server';
 import { verifyChildOwnership } from '@/lib/supabase/utils'; // Keep verifyChildOwnership
 import { aggregateSleepData } from '@/lib/analytics/sleepUtils';
+import { Database } from '@/lib/supabase/types';
 import { Session } from 'next-auth';
 import { withApiHandler } from '@/lib/api/handler'; // Import the wrapper
+
+type DailyReportWithNaps = Database['public']['Tables']['daily_reports']['Row'] & {
+  naps: Pick<Database['public']['Tables']['naps']['Row'], 'duration_text'>[] | null;
+};
 
 // Define the core logic for the GET handler
 const getSleepAnalyticsHandler = async (request: NextRequest, session: Session) => {
@@ -43,9 +48,9 @@ const getSleepAnalyticsHandler = async (request: NextRequest, session: Session) 
     throw reportError;
   }
 
-  // Aggregate data using the utility function
-  // Ensure reportData matches the expected input type for aggregateSleepData
-  const chartData = aggregateSleepData(reportData as any); // Use 'as any' for now, refine with proper types if needed
+  // Aggregate data using the utility function with typed data
+  const typedData: DailyReportWithNaps[] = reportData ?? [];
+  const chartData = aggregateSleepData(typedData);
 
   return NextResponse.json(chartData);
 };
