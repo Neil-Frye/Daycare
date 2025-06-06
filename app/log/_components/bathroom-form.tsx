@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
+import logger from '@/lib/logger';
 // TODO: Add Date/Time Picker component if not already available
 // import { DateTimePicker } from '@/components/ui/datetime-picker';
 
@@ -65,7 +66,6 @@ export default function BathroomForm({ childId }: BathroomFormProps) { // Use th
         return;
     }
     setIsLoading(true);
-    console.log('Submitting Bathroom Data:', { ...data, childId });
 
     try {
       const response = await fetch('/api/log', {
@@ -94,7 +94,7 @@ export default function BathroomForm({ childId }: BathroomFormProps) { // Use th
       });
       form.reset(); // Reset form after successful submission
     } catch (error) {
-      console.error('Error logging bathroom event:', error);
+      logger.error({ err: error }, 'Error logging bathroom event');
       toast({
         title: 'Error Logging Bathroom Event',
         description: error instanceof Error ? error.message : 'Could not save event details. Please try again.',

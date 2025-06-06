@@ -17,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
+import logger from '@/lib/logger';
 // TODO: Add Date/Time Picker component if not already available
 // import { DateTimePicker } from '@/components/ui/datetime-picker';
 
@@ -56,7 +57,6 @@ export default function ActivityForm({ childId }: ActivityFormProps) { // Use th
         return;
     }
     setIsLoading(true);
-    console.log('Submitting Activity Data:', { ...data, childId });
 
     try {
       const response = await fetch('/api/log', {
@@ -85,7 +85,7 @@ export default function ActivityForm({ childId }: ActivityFormProps) { // Use th
       });
       form.reset(); // Reset form after successful submission
     } catch (error) {
-      console.error('Error logging activity:', error);
+      logger.error({ err: error }, 'Error logging activity');
       toast({
         title: 'Error Logging Activity',
         description: error instanceof Error ? error.message : 'Could not save activity details. Please try again.',

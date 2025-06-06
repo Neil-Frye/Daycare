@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
+import logger from '@/lib/logger';
 
 export default function ErrorPage() {
   const searchParams = useSearchParams();
@@ -15,7 +16,7 @@ export default function ErrorPage() {
   // Log error for debugging
   useEffect(() => {
     if (error) {
-      console.error('Authentication error:', error);
+      logger.error({ err: error }, 'Authentication error');
     }
   }, [error]);
 
