@@ -140,7 +140,7 @@ See [app/api/user-daycare-providers/route.ts](app/api/user-daycare-providers/rou
 
 ## Testing
 
-Unit tests for email parsers and other core logic can be found in relevant `*.test.ts` files.
+Unit tests are written with **Jest** and can be found in `*.test.ts` files.
 
 Run tests with:
 

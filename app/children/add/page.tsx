@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import logger from '@/lib/logger'
 
 export default function AddChildPage() {
   const router = useRouter()
@@ -39,7 +40,6 @@ export default function AddChildPage() {
         throw new Error('No active session')
       }
 
-      console.log('Submitting form data:', formData);
       const response = await fetch('/api/children', {
         method: 'POST',
         headers: {
@@ -49,9 +49,7 @@ export default function AddChildPage() {
         body: JSON.stringify(formData)
       });
       
-      console.log('Response status:', response.status);
       const responseData = await response.json();
-      console.log('Response data:', responseData);
 
       if (!response.ok) {
         throw new Error(responseData.error || 'Failed to add child')
@@ -63,7 +61,7 @@ export default function AddChildPage() {
       })
       router.push('/')
     } catch (error) {
-      console.error('Submission error:', error);
+      logger.error({ err: error }, 'Submission error');
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to add child",

@@ -2,8 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase/server'; // Use server client
 import { verifyChildOwnership } from '@/lib/supabase/utils';
 import { aggregateMealData } from '@/lib/analytics/mealUtils'; // Import the aggregation utility
+import { Database } from '@/lib/supabase/types';
 import { Session } from 'next-auth';
 import { withApiHandler } from '@/lib/api/handler'; // Import the wrapper
+
+type DailyReportWithMeals = Database['public']['Tables']['daily_reports']['Row'] & {
+  meals: Pick<Database['public']['Tables']['meals']['Row'], 'food_description'>[] | null;
+};
 
 // Define the core logic for the GET handler
 const getMealAnalyticsHandler = async (request: NextRequest, session: Session) => {
@@ -40,9 +45,9 @@ const getMealAnalyticsHandler = async (request: NextRequest, session: Session) =
     throw reportError; // Throw error to be handled by the wrapper
   }
 
-  // Aggregate data using the utility function
-  // Use 'as any' for now, refine with proper Supabase types if needed
-  const aggregatedData = aggregateMealData(reportData as any);
+  // Aggregate data using the utility function with typed data
+  const typedData: DailyReportWithMeals[] = reportData ?? [];
+  const aggregatedData = aggregateMealData(typedData);
 
   return NextResponse.json(aggregatedData);
 };

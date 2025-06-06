@@ -14,6 +14,7 @@ import { ChildSelector } from '@/components/child-selector';
 import { ErrorBoundary } from '@/components/error-boundary';
 import supabaseClient from '@/lib/supabase/client';
 import { type Tables } from '@/lib/supabase/types';
+import logger from '@/lib/logger';
 import Image from 'next/image'; // Import Image component
 
 // Define Child type
@@ -53,7 +54,7 @@ export default function Home() {
           .order('name', { ascending: true });
 
         if (error) {
-          console.error('Error fetching children:', error);
+          logger.error({ err: error }, 'Error fetching children');
           setChildren([]);
         } else {
           setChildren(data || []);

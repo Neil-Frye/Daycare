@@ -1,10 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { google } from 'googleapis';
+import { google, gmail_v1 } from 'googleapis';
 import { Session } from 'next-auth';
 import { supabase } from '@/lib/supabase/server'; // Use server client
 import { withApiHandler } from '@/lib/api/handler'; // Import the wrapper
 import { processGmailMessage, ProcessMessageStatus } from '@/lib/gmail/processor'; // Import processor
 import logger from '@/lib/logger';
+
+// Simple in-memory rate limiting per user
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 5;
+const rateLimitMap = new Map<string, { count: number; firstRequest: number }>();
 
 /**
  * Gmail Fetch API Route
@@ -38,6 +43,25 @@ import logger from '@/lib/logger';
 const fetchGmailHandler = async (request: NextRequest, session: Session) => {
     const userId = session.user.id;
     const accessToken = session.accessToken;
+    const refreshToken = session.refreshToken;
+
+    // Basic per-user rate limiting
+    const rateRecord = rateLimitMap.get(userId ?? '');
+    const now = Date.now();
+    if (rateRecord) {
+        if (now - rateRecord.firstRequest < RATE_LIMIT_WINDOW_MS) {
+            if (rateRecord.count >= RATE_LIMIT_MAX_REQUESTS) {
+                logger.warn({ userId, route: '/api/gmail/fetch' }, 'Rate limit exceeded');
+                return NextResponse.json({ error: 'Rate limit exceeded. Try again later.' }, { status: 429 });
+            }
+            rateRecord.count++;
+        } else {
+            rateRecord.count = 1;
+            rateRecord.firstRequest = now;
+        }
+    } else {
+        rateLimitMap.set(userId ?? '', { count: 1, firstRequest: now });
+    }
 
     // Validate session details needed for Google API
     if (!accessToken) {
@@ -46,9 +70,15 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
         return NextResponse.json({ error: 'Authentication incomplete: Access token missing.' }, { status: 401 });
     }
 
-    // Initialize Google API client
-    const oauth2Client = new google.auth.OAuth2();
-    oauth2Client.setCredentials({ access_token: accessToken });
+    // Initialize Google API client with refresh token support
+    const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials({
+        access_token: accessToken,
+        refresh_token: refreshToken || undefined,
+    });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     // Fetch user's configured daycare providers from Supabase
@@ -100,17 +130,50 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
     }
     logger.info({ userId, route: '/api/gmail/fetch', maxMessagesToFetch: maxMessages }, "Determined max messages to fetch.");
 
-    // List recent messages from the configured senders
-    const listResponse = await gmail.users.messages.list({
-        userId: 'me',
-        q: query, // Use the dynamically constructed query
-        maxResults: maxMessages, 
-    });
+    // List recent messages from the configured senders with pagination support
+    let messageItems: gmail_v1.Schema$Message[] = [];
+    let pageToken: string | undefined = undefined;
+    do {
+        let listResponse;
+        try {
+            listResponse = await gmail.users.messages.list({
+                userId: 'me',
+                q: query,
+                maxResults: maxMessages,
+                pageToken,
+            });
+        } catch (err: any) {
+            if (err.code === 401 && refreshToken) {
+                try {
+                    const refreshed = await oauth2Client.refreshToken(refreshToken);
+                    oauth2Client.setCredentials({
+                        access_token: refreshed.tokens.access_token,
+                        refresh_token: refreshed.tokens.refresh_token ?? refreshToken,
+                    });
+                    listResponse = await gmail.users.messages.list({
+                        userId: 'me',
+                        q: query,
+                        maxResults: maxMessages,
+                        pageToken,
+                    });
+                } catch (refreshErr) {
+                    logger.error({ userId, route: '/api/gmail/fetch', err: refreshErr }, 'Failed to refresh access token');
+                    throw refreshErr;
+                }
+            } else {
+                throw err;
+            }
+        }
 
-    const messageItems = listResponse.data.messages || [];
+        if (listResponse.data.messages) {
+            messageItems.push(...listResponse.data.messages);
+        }
+        pageToken = listResponse.data.nextPageToken ?? undefined;
+    } while (pageToken);
+
     if (messageItems.length === 0) {
-        logger.info({ userId, route: '/api/gmail/fetch', query }, "No new messages found for the user's configured senders.");
-        return NextResponse.json({ message: "No new messages found based on your provider configurations." });
+        logger.info({ userId, route: '/api/gmail/fetch', query }, 'No new messages found for the user\'s configured senders.');
+        return NextResponse.json({ message: 'No new messages found based on your provider configurations.' });
     }
 
     logger.info({ userId, route: '/api/gmail/fetch', query, count: messageItems.length }, "Found messages to process.");
@@ -213,9 +276,9 @@ const fetchGmailHandler = async (request: NextRequest, session: Session) => {
      * - Error handling
      * - Logging
      * 
-     * TODO: Enhance to handle:
-     * - Google API token refresh
-     * - Rate limiting
-     * - Batch processing for large message sets
+     * Additional logic included:
+     * - Google API token refresh using OAuth2 refresh tokens
+     * - Simple in-memory rate limiting
+     * - Batch processing via Gmail pagination
      */
 export const GET = withApiHandler(fetchGmailHandler);
