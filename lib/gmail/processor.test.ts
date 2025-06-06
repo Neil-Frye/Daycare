@@ -225,7 +225,8 @@ describe('processGmailMessage - RPC Handling', () => {
         });
         (supabase.from('children').select().eq().ilike as jest.Mock).mockReturnValue({
              // .ilike() returns an array, so simulate empty array for no partial match
-            mockResolvedValue({ data: [], error: null }) 
+            data: [],
+            error: null
         });
          // Re-mock the specific part of the chain for ilike if it's more complex
         const mockIlikeQuery = jest.fn().mockResolvedValue({ data: [], error: null });

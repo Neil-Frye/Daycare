@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 import { ChildSelector } from '@/components/child-selector';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { GmailSyncButton } from '@/components/gmail-sync-button';
 import supabaseClient from '@/lib/supabase/client';
 import { type Tables } from '@/lib/supabase/types';
 import logger from '@/lib/logger';
@@ -43,6 +44,7 @@ export default function Home() {
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
   const [isLoadingChildren, setIsLoadingChildren] = useState(true);
   const [selectedChild, setSelectedChild] = useState<Child | null>(null); // Store selected child object
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null); // Track last sync for refresh trigger
 
   useEffect(() => {
     if (status === 'authenticated') {
@@ -89,6 +91,21 @@ export default function Home() {
     setSelectedChild(children.find(c => c.id === childId) || null);
   };
 
+  // Refresh dashboard data when sync completes with new reports
+  useEffect(() => {
+    if (lastSyncTime && status === 'authenticated') {
+      // Here you would refresh any dashboard data that displays synced reports
+      // For now, we'll just log it. In a real implementation, you'd fetch updated metrics/reports
+      logger.info('Dashboard refresh triggered after Gmail sync', { lastSyncTime });
+      
+      // TODO: Add actual data refresh logic here
+      // For example:
+      // - Refresh daily reports
+      // - Update analytics data
+      // - Refresh activity counts
+    }
+  }, [lastSyncTime, status]);
+
   // Mock data for display based on the design
   const mockChildPhotoUrl = '/placeholder-child.jpg'; // Replace with actual logic if available
 
@@ -114,6 +131,18 @@ export default function Home() {
               )}
               {status === 'authenticated' && (
                 <div className="flex items-center gap-3">
+                  {/* Gmail Sync Button */}
+                  <GmailSyncButton 
+                    variant="outline"
+                    size="sm"
+                    onSyncComplete={(result) => {
+                      if (result.success && result.hasNewReports) {
+                        // Trigger a refresh by updating the sync time
+                        setLastSyncTime(new Date());
+                      }
+                    }}
+                  />
+                  
                   <span className="text-sm text-gray-600 hidden sm:inline">
                     {session.user?.name ? session.user.name.split(' ')[0] : 'User'}
                   </span>
@@ -192,7 +221,7 @@ export default function Home() {
                      {/* Placeholder Image - Replace with actual child photo */}
                      <Image
                         src={mockChildPhotoUrl}
-                        alt={selectedChild.name || 'Child photo'}
+                        alt={`${selectedChild.first_name} ${selectedChild.last_name}` || 'Child photo'}
                         width={300}
                         height={300}
                         className="object-cover w-full h-full"

@@ -62,7 +62,7 @@ export function ChildSelector({
         {/* Map over the children prop */}
         {children.map((child) => (
           <SelectItem key={child.id} value={child.id}>
-            {child.name}
+            {child.first_name} {child.last_name}
           </SelectItem>
         ))}
       </SelectContent>
